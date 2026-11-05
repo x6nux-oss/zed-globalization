@@ -171,3 +171,52 @@ def split_batch(
 
     batches = [dict(items[i : i + capacity]) for i in range(0, len(items), capacity)]
     return batches, content
+
+
+# 目标批次规模（条目数）。按 52947 条总量估算约 265 个会话，
+# 并发 10 时约 1 小时，落在 5h50m 预算内。
+TARGET_BATCH_SIZE = 200
+
+# 超过此条目数的文件单独成批：混装会让单个会话过长，
+# 失败重试的代价也更大。
+OVERSIZE_FILE_ENTRIES = 300
+
+
+def group_batches(
+    all_strings: dict[str, dict[str, str]],
+    target_size: int = TARGET_BATCH_SIZE,
+    oversize: int = OVERSIZE_FILE_ENTRIES,
+) -> list[dict[str, dict[str, str]]]:
+    """按文件累积合批，每批总量接近 target_size。
+
+    超大文件（超过 oversize 条）单独成批，避免与小文件混装后
+    单个会话过长——会话越长，失败重试浪费的 token 越多。
+    """
+    batches: list[dict[str, dict[str, str]]] = []
+    current: dict[str, dict[str, str]] = {}
+    current_size = 0
+
+    for file_path, strings in all_strings.items():
+        if not strings:
+            continue
+        size = len(strings)
+
+        if size > oversize:
+            # 先封掉手头这批，再让超大文件独占一批
+            if current:
+                batches.append(current)
+                current, current_size = {}, 0
+            batches.append({file_path: strings})
+            continue
+
+        # 累积到「超过」目标才封批：让每批尽量接近 target_size，
+        # 否则小文件会一批一个，会话数暴涨
+        current[file_path] = strings
+        current_size += size
+        if current_size >= target_size:
+            batches.append(current)
+            current, current_size = {}, 0
+
+    if current:
+        batches.append(current)
+    return batches

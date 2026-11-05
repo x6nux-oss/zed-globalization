@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from zedl10n import translate as tr  # noqa: E402
+from zedl10n.batch import group_batches  # noqa: E402
 from zedl10n.prompts import validate_placeholders  # noqa: E402
 from zedl10n.replace import (  # noqa: E402
     _escape_for_rust_source, _find_protected_ranges, _replace_skip_protected,
@@ -221,6 +222,54 @@ def test_translate_time_limit_keeps_finished_batches() -> None:
     assert result["fast.rs"] == {"Save": "译:Save"}, result
     assert result["slow.rs"] == {}, result
     assert result["old.rs"] == {"Quit": "退出"}, result
+
+
+def test_group_batches_by_file_accumulation() -> None:
+    """按文件累积合批：小文件凑满 target_size 才封批"""
+    strings = {
+        "a.rs": {f"s{i}": "" for i in range(120)},
+        "b.rs": {f"t{i}": "" for i in range(120)},
+        "c.rs": {"u0": ""},
+    }
+    batches = group_batches(strings, target_size=200)
+    assert len(batches) == 2, [list(b) for b in batches]
+    assert list(batches[0]) == ["a.rs", "b.rs"], list(batches[0])
+    assert list(batches[1]) == ["c.rs"]
+
+
+def test_group_batches_oversize_file_alone() -> None:
+    """单文件超 oversize 门槛时单独成批，不与小文件混装"""
+    strings = {
+        "small.rs": {"s0": ""},
+        "huge.rs": {f"h{i}": "" for i in range(350)},
+        "tail.rs": {"t0": ""},
+    }
+    batches = group_batches(strings, target_size=200, oversize=300)
+    names = [list(b) for b in batches]
+    assert ["small.rs"] in names, names
+    assert ["huge.rs"] in names, names
+    assert ["tail.rs"] in names, names
+
+
+def test_group_batches_exact_boundary_and_empty() -> None:
+    """恰好等于 target_size 时封批；空输入返回空列表"""
+    assert len(group_batches({}, target_size=200)) == 0
+    exact = {"a.rs": {f"s{i}": "" for i in range(200)}}
+    assert len(group_batches(exact, target_size=200)) == 1
+
+
+def test_group_batches_preserves_all_entries() -> None:
+    """合批不得丢失或改写任何条目"""
+    strings = {
+        "a.rs": {"Save": "", "Open": ""},
+        "b.rs": {"Quit": ""},
+    }
+    batches = group_batches(strings, target_size=200)
+    merged: dict[str, dict[str, str]] = {}
+    for b in batches:
+        for fp, entries in b.items():
+            merged.setdefault(fp, {}).update(entries)
+    assert merged == strings
 
 
 def main() -> int:
