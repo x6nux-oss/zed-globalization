@@ -167,44 +167,6 @@ def parse_json_response(raw: str) -> dict[str, str]:
     return {}
 
 
-def parse_xml_response(raw: str) -> dict[str, str]:
-    """从 AI 返回的 XML 中提取翻译结果"""
-    import re
-    import xml.etree.ElementTree as ET
-
-    m = re.search(r"<translations.*?>.*</translations>", raw, re.DOTALL)
-    if not m:
-        return {}
-    try:
-        root = ET.fromstring(m.group(0))
-    except ET.ParseError:
-        return {}
-    result: dict[str, str] = {}
-    for t in root.findall("t"):
-        s_el, v_el = t.find("s"), t.find("v")
-        if s_el is not None and s_el.text:
-            result[s_el.text] = (v_el.text or "") if v_el is not None else ""
-    return result
-
-
-def parse_numbered_response(raw: str, keys: list[str]) -> dict[str, str]:
-    """从 AI 返回的编号格式文本中提取翻译结果。
-
-    格式: [##1##]译文1\\n[##2##]\\n[##3##]译文3
-    通过编号映射回原始 key，避免原文中的特殊字符干扰解析。
-    """
-    import re
-
-    result: dict[str, str] = {}
-    pattern = re.compile(r"\[##(\d+)##\](.*?)(?=\[##\d+##\]|\Z)", re.DOTALL)
-    for m in pattern.finditer(raw):
-        idx = int(m.group(1)) - 1  # 编号从 1 开始
-        value = m.group(2).strip()
-        if 0 <= idx < len(keys):
-            result[keys[idx]] = value
-    return result
-
-
 def extract_placeholders(s: str) -> list[str]:
     """提取字符串中所有格式占位符，忽略 {{ 和 }} 转义。
 

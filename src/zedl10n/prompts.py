@@ -73,36 +73,6 @@ _USER_PROMPT_NO_SOURCE = """文件: {file_path}
 
 请翻译以上字符串，返回 JSON 对象。"""
 
-XML_FALLBACK_INSTRUCTION = """
-（重要：此次请使用 XML 格式返回，不要使用 JSON）
-
-输出格式:
-<translations>
-<t><s><![CDATA[原文1]]></s><v>译文1</v></t>
-<t><s><![CDATA[原文2]]></s><v></v></t>
-</translations>
-
-注意：原文必须用 <![CDATA[...]]> 包裹，防止特殊字符干扰 XML 解析。
-不需要翻译的字符串，<v> 标签内留空。只返回 XML，不要添加解释。"""
-
-
-def build_numbered_instruction(count: int) -> str:
-    """构建编号格式降级指令"""
-    return f"""
-（重要：此次请使用编号格式返回，不要使用 JSON 或 XML）
-
-按上面的字符串编号，逐条返回翻译结果。格式如下:
-[##1##]译文1
-[##2##]
-[##3##]译文3
-
-规则:
-- 每条以 [##编号##] 开头，紧跟译文（同一行）
-- 不需要翻译的字符串，[##编号##] 后面留空即可
-- 不要添加任何解释文字
-- 必须包含所有编号，从 1 到 {count}"""
-
-
 def build_entries_text(strings: dict[str, str]) -> str:
     """构建待翻译条目文本（编号 + 字符串）"""
     lines: list[str] = []
