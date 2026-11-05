@@ -270,6 +270,12 @@ async def run_session(args: SessionArgs) -> SessionResult:
             args.batch_id, translations, untranslatable, ok=False,
             detail=f"会话超时（{args.timeout:.0f}s）",
         )
+    except asyncio.CancelledError:
+        # 全局时限到达时上层会 cancel 本任务。必须在这里杀掉子进程，
+        # 否则 claude 会变成孤儿继续跑，白白占用模型配额与 CPU。
+        proc.kill()
+        await proc.wait()
+        raise
 
     translations = collect_jsonl(str(out_path))
     untranslatable = collect_untranslatable(str(dnt_path))

@@ -115,12 +115,24 @@ async def _translate_async(
         async with semaphore:
             res = await run_session(args)
         if not res.ok:
-            log.warning("批次 %s 失败: %s", batch_id, res.detail)
+            # 失败不中断：超时批次可能已提交部分译文，照样收下；
+            # 未覆盖的条目保持缺失，下次增量自动补翻。
+            log.warning(
+                "批次 %s 失败（%s），已收到 %d 条译文",
+                batch_id, res.detail, len(res.translations),
+            )
+        if not res.translations and not res.untranslatable:
             return
         untranslatable.extend(res.untranslatable)
         for fp, entries in batch.items():
             for original in entries:
                 translated = res.translations.get(original, "")
+                if not translated:
+                    # 本次没翻出来：full 模式下这条是「待重翻」，
+                    # 直接用空值会把已有的好译文抹掉，故保留旧值。
+                    # 旧值本身是空的就仍然留空，缺口照常传给下次增量。
+                    result.setdefault(fp, {}).setdefault(original, "")
+                    continue
                 result.setdefault(fp, {})[original] = translated
 
     total = len(batches)
@@ -173,20 +185,40 @@ def _merge_untranslatable(records: list[dict]) -> None:
     合并而非覆盖：清单由 05 流程维护，这里只做增量补充。
     清单结构为 {global_entries: [{original, reason}], entries: [...]}，
     全局条目写 global_entries，与 05 流程产出的形状保持一致。
-    """
-    from .untranslatable import DNT_PATH, _load_registry
 
-    data, _, covered_global = _load_registry(DNT_PATH)
+    **写进清单是不可逆的**——条目一旦入清单，后续所有增量轮次都不再翻译它。
+    agent 误判（把正常界面文案标成标识符）会让该条永久得不到翻译，
+    因此这里只用 05 流程那套保守规则复核：规则认不出的，不进清单，
+    留给下次翻译重试。宁可多问一遍 AI，也不可永久丢弃文案。
+    """
+    from . import untranslatable as un
+
+    data, _, covered_global = un._load_registry(un.DNT_PATH)
+    added = 0
+    rejected: list[str] = []
     for rec in records:
         original = rec.get("original")
         if not original or original in covered_global:
+            continue
+        if un.rule_verdict(original) is None:
+            # 规则认为这是可翻译文案，不采信 agent 的判定
+            rejected.append(original)
             continue
         data["global_entries"].append({
             "original": original,
             "reason": f"agent: {rec.get('reason', 'unknown')}",
         })
         covered_global.add(original)
-    save_json(data, DNT_PATH)
+        added += 1
+
+    if rejected:
+        log.info(
+            "拒绝 %d 条 agent 误判的禁翻标记（规则判定为可翻译）",
+            len(rejected),
+        )
+    if added:
+        save_json(data, un.DNT_PATH)
+        log.info("禁翻清单新增 %d 条", added)
 
 
 def translate_all(

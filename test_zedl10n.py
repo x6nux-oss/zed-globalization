@@ -531,6 +531,86 @@ def test_mcp_record_translations_empty_list() -> None:
     assert record_translations(str(out), "b11", []) == 0
 
 
+def test_translate_async_keeps_partial_results_from_failed_session() -> None:
+    """失败的会话若有部分译文，必须收下——超时前写的不能白写"""
+    async def partial_session(args):
+        from zedl10n.oc_translate import SessionResult
+        return SessionResult(
+            args.batch_id, {"Save": "保存"}, ok=False,
+            detail="会话超时（300s）",
+        )
+
+    orig = tr.run_session
+    tr.run_session = partial_session
+    try:
+        result, complete = asyncio.run(tr._translate_async(
+            {"a.rs": {"Save": "", "Open": ""}},
+            {},
+            "incremental", "zh-CN",
+            str(Path(__file__).parent / "config" / "glossary.yaml"),
+            AIConfig(base_url="", api_key="", model="m", concurrency=2),
+            time_limit=None,
+        ))
+    finally:
+        tr.run_session = orig
+
+    assert result["a.rs"]["Save"] == "保存", "超时前提交的译文被丢弃了"
+    assert result["a.rs"]["Open"] == "", "未覆盖的条目应为空，留给下次"
+
+
+def test_merge_untranslatable_rejects_agent_misjudgement() -> None:
+    """agent 把可翻译文案标成禁翻时，规则复核必须拦住
+
+    清单是不可逆的：误判入清单后该条永久不再翻译。
+    """
+    import tempfile as _tf
+    from zedl10n import translate as _tr
+    from zedl10n.untranslatable import _load_registry
+
+    td = Path(_tf.mkdtemp())
+    dnt = td / "dnt.json"
+    orig_path = _tr.__dict__.get("_DNT_PATH_OVERRIDE")
+
+    # 临时把 DNT_PATH 指到测试目录
+    import zedl10n.untranslatable as un
+    saved = un.DNT_PATH
+    un.DNT_PATH = str(dnt)
+    try:
+        _tr._merge_untranslatable([
+            {"original": "Save", "reason": "误判为标识符"},        # 界面文案，应拒绝
+            {"original": "tool_name", "reason": "identifier"},      # 真标识符，应接受
+        ])
+        data, _, covered = _load_registry(str(dnt))
+        assert "tool_name" in covered, "真标识符应入清单"
+        assert "Save" not in covered, "界面文案被误判入清单，会永久失去翻译"
+    finally:
+        un.DNT_PATH = saved
+
+
+def test_full_mode_does_not_wipe_existing_translations() -> None:
+    """full 模式重翻时，本次没翻出来的条目保留旧译文而非置空"""
+    async def partial_session(args):
+        from zedl10n.oc_translate import SessionResult
+        return SessionResult(args.batch_id, {"Save": "保存"}, ok=True)
+
+    orig = tr.run_session
+    tr.run_session = partial_session
+    try:
+        result, _ = asyncio.run(tr._translate_async(
+            {"a.rs": {"Save": "", "Open": ""}},
+            {"a.rs": {"Save": "旧保存", "Open": "打开"}},
+            "full", "zh-CN",
+            str(Path(__file__).parent / "config" / "glossary.yaml"),
+            AIConfig(base_url="", api_key="", model="m", concurrency=2),
+            time_limit=None,
+        ))
+    finally:
+        tr.run_session = orig
+
+    assert result["a.rs"]["Save"] == "保存", "成功翻出的应覆盖旧值"
+    assert result["a.rs"]["Open"] == "打开", "没翻出的条目被清空了，好译文丢失"
+
+
 def main() -> int:
     logging.disable(logging.WARNING)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
