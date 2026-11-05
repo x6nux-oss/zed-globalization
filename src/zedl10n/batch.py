@@ -181,16 +181,23 @@ TARGET_BATCH_SIZE = 200
 # 失败重试的代价也更大。
 OVERSIZE_FILE_ENTRIES = 300
 
+# 单批条目数硬上限。超大文件单独成批后仍需再切，否则一个文件
+# 1471 条会让单个会话跑几十分钟，失败重试代价极高。
+MAX_BATCH_ENTRIES = 250
+
 
 def group_batches(
     all_strings: dict[str, dict[str, str]],
     target_size: int = TARGET_BATCH_SIZE,
     oversize: int = OVERSIZE_FILE_ENTRIES,
+    max_entries: int = MAX_BATCH_ENTRIES,
 ) -> list[dict[str, dict[str, str]]]:
     """按文件累积合批，每批总量接近 target_size。
 
     超大文件（超过 oversize 条）单独成批，避免与小文件混装后
-    单个会话过长——会话越长，失败重试浪费的 token 越多。
+    单个会话过长；但单独成批仍可能远超 max_entries（如 1471 条的
+    default_colors.rs），故再按 max_entries 切分，保证每个会话的
+    工作量有上界——会话越长，失败重试浪费的 token 越多。
     """
     batches: list[dict[str, dict[str, str]]] = []
     current: dict[str, dict[str, str]] = {}
@@ -202,11 +209,15 @@ def group_batches(
         size = len(strings)
 
         if size > oversize:
-            # 先封掉手头这批，再让超大文件独占一批
+            # 先封掉手头这批，再让超大文件按 max_entries 切成多批。
+            # 单文件独占一批仍可能远超上界（1471 条的文件会让单个会话
+            # 跑几十分钟），故必须再切。
             if current:
                 batches.append(current)
                 current, current_size = {}, 0
-            batches.append({file_path: strings})
+            items = list(strings.items())
+            for i in range(0, len(items), max_entries):
+                batches.append({file_path: dict(items[i : i + max_entries])})
             continue
 
         # 累积到「超过」目标才封批：让每批尽量接近 target_size，

@@ -40,12 +40,80 @@ def record_translation(
     return f"已记录: {original} => {translated}"
 
 
+def record_translations(
+    out_dir: str, batch_id: str, entries: list[dict],
+) -> int:
+    """批量记录译文，返回实际写入条数。
+
+    逐条提交时每条都要一轮模型往返（实测约 3 秒/条），200 条的批次
+    光往返就 10 分钟，是吞吐的主要瓶颈。批量提交把往返次数压到
+    「批次 / 单次提交量」。
+
+    残缺条目跳过而非整批失败：一条坏数据不该让其余译文一起丢掉。
+    同时接受 `translated` 与 `translation` 两种键名——模型两种都会用，
+    只认一种会静默丢掉大半个批次（实测 30 条只成 17 条）。
+    """
+    valid: list[dict] = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        original = e.get("original")
+        translated = e.get("translated")
+        if translated is None:
+            translated = e.get("translation")
+        if not isinstance(original, str) or not original:
+            continue
+        if not isinstance(translated, str) or not translated.strip():
+            continue
+        valid.append({"original": original, "translated": translated})
+    if not valid:
+        return 0
+
+    if not out_dir:
+        raise RuntimeError("未配置输出目录（L10N_OUT_DIR）")
+    target = Path(out_dir) / f"{batch_id}.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as f:
+        for rec in valid:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return len(valid)
+
+
 def record_untranslatable(
     dnt_dir: str, batch_id: str, original: str, reason: str,
 ) -> str:
     """记录一条无需翻译的条目"""
     _append_jsonl(dnt_dir, batch_id, {"original": original, "reason": reason})
     return f"已标记无需翻译: {original} ({reason})"
+
+
+def record_untranslatables(
+    dnt_dir: str, batch_id: str, entries: list[dict],
+) -> int:
+    """批量记录无需翻译的条目，返回实际写入条数。
+
+    逐条标记同样是每条一轮模型往返，批量可把往返压到 1 次。
+    """
+    valid: list[dict] = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        original = e.get("original")
+        if not isinstance(original, str) or not original:
+            continue
+        reason = e.get("reason") or "unknown"
+        valid.append({"original": original, "reason": str(reason)})
+    if not valid:
+        return 0
+
+    if not dnt_dir:
+        raise RuntimeError("未配置输出目录（L10N_DNT_DIR）")
+    target = Path(dnt_dir) / f"{batch_id}.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a", encoding="utf-8") as f:
+        for rec in valid:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return len(valid)
 
 
 def lookup_term(glossary_path: str, term: str) -> str:
@@ -95,8 +163,20 @@ def build_server() -> MCPServer:
 
     @server.tool(
         description=(
-            "提交一条译文。**每翻译完一条就立即调用本工具**，"
+            "批量提交译文。**每翻完一批（建议 20~50 条）就调用一次本工具**，"
             "不要在回复正文里输出译文。original 必须与原文完全一致。"
+            "批量提交远比逐条提交快：每次调用都要一轮模型往返。"
+        ),
+    )
+    def submit_translations(entries: list[dict]) -> str:
+        """批量提交译文，返回写入条数"""
+        n = record_translations(out_dir, batch_id, entries)
+        return f"已记录 {n} 条译文"
+
+    @server.tool(
+        description=(
+            "提交单条译文。优先用 submit_translations 批量提交；"
+            "本工具仅在需要单条补交时使用。"
         ),
     )
     def submit_translation(original: str, translated: str) -> str:
@@ -105,8 +185,19 @@ def build_server() -> MCPServer:
 
     @server.tool(
         description=(
-            "标记某条字符串无需翻译（纯代码标识符、变量名、key 名等）。"
-            "注意：正常界面文案必须翻译，只有确定是标识符时才用本工具。"
+            "批量标记无需翻译的字符串（纯代码标识符、变量名、key 名等）。"
+            "正常界面文案必须翻译，只有确定是标识符时才用本工具。"
+            "**一次性传入整批**，逐条标记会让整批慢十几倍。"
+        ),
+    )
+    def mark_untranslatables(entries: list[dict]) -> str:
+        """批量标记无需翻译的条目，返回写入条数"""
+        n = record_untranslatables(dnt_dir, batch_id, entries)
+        return f"已标记 {n} 条无需翻译"
+
+    @server.tool(
+        description=(
+            "标记单条字符串无需翻译。优先用 mark_untranslatables 批量标记。"
         ),
     )
     def mark_untranslatable(original: str, reason: str) -> str:

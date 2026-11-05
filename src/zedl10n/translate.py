@@ -13,6 +13,8 @@ from .batch import group_batches
 from .oc_translate import (
     SessionArgs,
     build_batch_prompt,
+    load_glossary_inline,
+    load_source_snippet,
     run_session,
     write_mcp_config,
 )
@@ -86,12 +88,19 @@ async def _translate_async(
 
     semaphore = asyncio.Semaphore(ai_cfg.concurrency)
     untranslatable: list[dict] = []
+    # 术语表内联进提示词：逐词查表要花一轮往返，是吞吐瓶颈之一
+    glossary_text = load_glossary_inline(glossary_path)
 
     async def do_batch(idx: int, batch: dict) -> None:
         batch_id = f"b{idx:04d}"
-        # 一个批次可含多个文件，提示词里逐个文件分段列出
+        # 一个批次可含多个文件，提示词里逐个文件分段列出，
+        # 每个文件都带上术语表与源码上下文（agent 读了就会反复读，
+        # 实测 30 条读 9 次占掉大半时间）
         prompt_parts = [
-            build_batch_prompt(fp, entries, lang)
+            build_batch_prompt(
+                fp, entries, lang, glossary_text,
+                load_source_snippet(source_root, fp),
+            )
             for fp, entries in batch.items()
         ]
         args = SessionArgs(

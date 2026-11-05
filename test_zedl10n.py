@@ -396,14 +396,15 @@ def test_mcp_record_untranslatable() -> None:
 
 
 def test_mcp_server_exposes_three_tools() -> None:
-    """server 必须暴露三个 tool，名称与 agent 白名单一致"""
+    """server 必须暴露全部 tool，名称与 agent 白名单一致"""
     import asyncio
     from zedl10n.mcp_server import build_server
     # 用公共 list_tools，避免依赖 SDK 私有属性
     tools = asyncio.run(build_server().list_tools())
     names = {t.name for t in tools}
     assert names == {
-        "glossary_lookup", "submit_translation", "mark_untranslatable",
+        "glossary_lookup", "submit_translation", "submit_translations",
+        "mark_untranslatable", "mark_untranslatables",
     }, names
 
 
@@ -476,6 +477,58 @@ def test_write_mcp_config() -> None:
     entry = cfg["mcpServers"]["l10n"]
     assert entry["command"]
     assert "mcp_server.py" in " ".join(entry["args"])
+
+
+def test_group_batches_splits_oversize_file_into_chunks() -> None:
+    """超大文件单独成批后仍按 max_entries 再切：单个会话工作量必须有上界"""
+    strings = {"huge.rs": {f"h{i}": "" for i in range(1471)}}
+    batches = group_batches(strings, target_size=200, oversize=300, max_entries=250)
+    sizes = [len(b["huge.rs"]) for b in batches]
+    assert len(batches) == 6, sizes
+    assert max(sizes) <= 250, sizes
+    # 不得丢条目
+    assert sum(sizes) == 1471, sizes
+
+
+def test_mcp_record_translations_batch() -> None:
+    """批量提交：一次 tool 调用写多条，把模型往返次数从 N 降到 N/批。
+
+    逐条提交时每条都要一轮 LLM 往返（实测约 3 秒/条），200 条的批次
+    光往返就 10 分钟。批量提交是吞吐的关键。
+    """
+    out = Path(tempfile.mkdtemp()) / "out"
+    from zedl10n.mcp_server import record_translations
+    n = record_translations(str(out), "b9", [
+        {"original": "Save", "translated": "保存"},
+        {"original": "Open", "translated": "打开"},
+        {"original": "Quit", "translated": "退出"},
+    ])
+    assert n == 3
+
+    import json
+    lines = (out / "b9.jsonl").read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 3, lines
+    assert json.loads(lines[1]) == {"original": "Open", "translated": "打开"}
+
+
+def test_mcp_record_translations_skips_invalid_entries() -> None:
+    """批量里的残缺条目跳过，不因一条坏数据丢掉整批"""
+    out = Path(tempfile.mkdtemp()) / "out"
+    from zedl10n.mcp_server import record_translations
+    n = record_translations(str(out), "b10", [
+        {"original": "Save", "translated": "保存"},
+        {"original": "", "translated": "无原文"},
+        {"original": "Empty", "translated": "  "},
+        {"original": "Open"},  # 缺 translated
+    ])
+    assert n == 1, n
+
+
+def test_mcp_record_translations_empty_list() -> None:
+    """空列表是合法输入（agent 可能提交空批），返回 0 且不建文件"""
+    out = Path(tempfile.mkdtemp()) / "out"
+    from zedl10n.mcp_server import record_translations
+    assert record_translations(str(out), "b11", []) == 0
 
 
 def main() -> int:

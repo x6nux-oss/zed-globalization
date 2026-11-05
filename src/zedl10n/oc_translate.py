@@ -51,26 +51,94 @@ class SessionResult:
     detail: str = ""
 
 
+def load_glossary_inline(glossary_path: str) -> str:
+    """把术语表内联成提示词片段。
+
+    术语表只有几十条，内联进提示词比让 agent 逐词调 glossary_lookup
+    便宜得多——每次查表都是一轮模型往返，实测占掉大半时间。
+    文件缺失或解析失败时返回空串，翻译照常进行。
+    """
+    path = Path(glossary_path) if glossary_path else None
+    if not path or not path.exists():
+        return ""
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return ""
+    terms = data.get("terms") or {}
+    keep = data.get("keep_original") or []
+    if not terms and not keep:
+        return ""
+
+    lines = ["\n## 术语表（必须遵守）\n"]
+    if terms:
+        lines.append("约定译法：")
+        lines.extend(f"- {k} => {v}" for k, v in terms.items())
+    if keep:
+        lines.append("\n保持原文不译（专有名词）：")
+        lines.append("- " + "、".join(str(k) for k in keep))
+    return "\n".join(lines) + "\n"
+
+
 def build_batch_prompt(
     file_path: str, strings: dict[str, str], lang: str,
+    glossary_text: str = "", source_snippet: str = "",
 ) -> str:
     """构建批次提示词。
 
-    只列出待翻条目，不内联源码——agent 需要语境时自己用 read 工具去读，
-    这比 Python 预先截断源码塞进 prompt 更省 token 也更准确。
+    术语表与源码上下文都内联：每次 Read/glossary_lookup 都是一轮完整的
+    模型往返（实测约 4 秒），而 agent 一旦被允许读文件就会反复读
+    （实测 30 条读了 9 次、占掉 39 秒里的绝大部分）。把上下文直接给它，
+    往返次数才能压到 1~2 次。
     """
     entries = "\n".join(f"- {s}" for s in strings)
+    source_block = (
+        f"\n## 源码上下文（这些字符串所在的文件）\n"
+        f"```rust\n{source_snippet}\n```\n"
+        if source_snippet else ""
+    )
     return (
         f"把下面 {len(strings)} 条 Zed 编辑器界面字符串翻译成 {lang}。\n"
-        f"它们来自源文件 {file_path}，需要判断语境时用 read 工具读取该文件。\n\n"
-        f"要求：\n"
-        f"1. **每翻译完一条立即调用 submit_translation 提交**，不要在正文输出译文。\n"
-        f"2. original 必须与下面列出的原文逐字符一致。\n"
-        f"3. 占位符（{{}}、{{0}}、%s 等）必须原样保留，数量与顺序都不能变。\n"
-        f"4. 技术术语先调 glossary_lookup 查表。\n"
-        f"5. 纯代码标识符用 mark_untranslatable 标记，不要翻译。\n\n"
-        f"待翻译条目：\n{entries}\n"
+        f"它们来自源文件 {file_path}。\n"
+        f"{glossary_text}"
+        f"{source_block}\n"
+        f"## 工作方式（重要）\n"
+        f"**每次 tool 调用都是一轮模型往返，往返次数决定整批速度。**\n"
+        f"上下文已经在上面给全了，**不要调用 Read**。工作方式是：\n"
+        f"1. 通读整批，一次性想好所有译文。\n"
+        f"2. 调 **一次** `submit_translations`，传入全部译文（数组）。\n"
+        f"3. 若有代码标识符，调 **一次** `mark_untranslatables` 批量标记。\n"
+        f"理想情况 tool 调用总数是 1~2 次。\n\n"
+        f"## 质量要求\n"
+        f"- original 必须与下面列出的原文逐字符一致。\n"
+        f"- 占位符（{{}}、{{0}}、%s 等）必须原样保留，数量与顺序都不能变。\n"
+        f"- 正常界面文案必须翻译；纯代码标识符才标记为无需翻译。\n"
+        f"- 条目键名用 `original` / `translated`。\n\n"
+        f"## 待翻译条目（共 {len(strings)} 条）\n{entries}\n"
     )
+
+
+def load_source_snippet(source_root: str, file_path: str, max_chars: int = 12000) -> str:
+    """读取源文件内容作为上下文，超长则截断。
+
+    截断而非放弃：开头部分通常已包含类型定义与主要字符串，
+    足够判断语境；agent 本来也只能从片段里获得有限帮助。
+    """
+    if not source_root:
+        return ""
+    root = Path(source_root)
+    for candidate in (root / file_path, root / file_path.removeprefix("zed/")):
+        if candidate.is_file():
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except Exception:
+                return ""
+            if len(text) <= max_chars:
+                return text
+            return text[:max_chars] + "\n// ...（文件过长，已截断）"
+    return ""
 
 
 def write_mcp_config(path: str, mcp_script: str) -> None:
@@ -190,8 +258,16 @@ async def run_session(args: SessionArgs) -> SessionResult:
     except TimeoutError:
         proc.kill()
         await proc.wait()
+        # 超时前 agent 可能已提交部分译文：收回来，别丢掉。
+        # 这批已写入的条目照样算数，缺口留给下次增量补。
+        translations = collect_jsonl(str(out_path))
+        untranslatable = collect_untranslatable(str(dnt_path))
+        log.warning(
+            "会话 %s 超时（%.0fs），已收回到期前提交的 %d 条译文",
+            args.batch_id, args.timeout, len(translations),
+        )
         return SessionResult(
-            args.batch_id, ok=False,
+            args.batch_id, translations, untranslatable, ok=False,
             detail=f"会话超时（{args.timeout:.0f}s）",
         )
 
