@@ -60,3 +60,10 @@ target/
 
 # 本地 NSIS 安装器测试产物
 test-nsis/
+
+# 翻译会话临时产物（JSONL / mcp.json）
+i18n/.session/
+i18n/.smoke/
+
+# SDD 执行工作目录
+.superpowers/

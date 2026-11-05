@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from zedl10n import translate as tr  # noqa: E402
 from zedl10n.batch import group_batches  # noqa: E402
+from zedl10n.oc_translate import (  # noqa: E402
+    build_batch_prompt, collect_jsonl, write_mcp_config,
+)
 from zedl10n.prompts import validate_placeholders  # noqa: E402
 from zedl10n.replace import (  # noqa: E402
     _escape_for_rust_source, _find_protected_ranges, _replace_skip_protected,
@@ -339,6 +342,77 @@ def test_mcp_server_exposes_three_tools() -> None:
     assert names == {
         "glossary_lookup", "submit_translation", "mark_untranslatable",
     }, names
+
+
+def test_collect_jsonl_normal() -> None:
+    """正常 JSONL 解析为 原文→译文 映射"""
+    p = Path(tempfile.mkdtemp()) / "b.jsonl"
+    p.write_text(
+        '{"original": "Save", "translated": "保存"}\n'
+        '{"original": "Open", "translated": "打开"}\n',
+        encoding="utf-8",
+    )
+    assert collect_jsonl(str(p)) == {"Save": "保存", "Open": "打开"}
+
+
+def test_collect_jsonl_skips_bad_lines() -> None:
+    """坏行（截断的 JSON）跳过，不影响其余条目"""
+    p = Path(tempfile.mkdtemp()) / "b.jsonl"
+    p.write_text(
+        '{"original": "Save", "translated": "保存"}\n'
+        '{"original": "Open", "translat\n'
+        '{"original": "Quit", "translated": "退出"}\n',
+        encoding="utf-8",
+    )
+    assert collect_jsonl(str(p)) == {"Save": "保存", "Quit": "退出"}
+
+
+def test_collect_jsonl_skips_empty_and_missing_fields() -> None:
+    """空译文与字段缺失的条目跳过：它们等同未翻译，留给下次"""
+    p = Path(tempfile.mkdtemp()) / "b.jsonl"
+    p.write_text(
+        '{"original": "Save", "translated": ""}\n'
+        '{"original": "Open"}\n'
+        '{"translated": "无原文"}\n'
+        '{"original": "Quit", "translated": "退出"}\n',
+        encoding="utf-8",
+    )
+    assert collect_jsonl(str(p)) == {"Quit": "退出"}
+
+
+def test_collect_jsonl_duplicate_last_wins() -> None:
+    """同一条重复提交时取最后一次：agent 修正是正常行为"""
+    p = Path(tempfile.mkdtemp()) / "b.jsonl"
+    p.write_text(
+        '{"original": "Save", "translated": "保存"}\n'
+        '{"original": "Save", "translated": "存储"}\n',
+        encoding="utf-8",
+    )
+    assert collect_jsonl(str(p)) == {"Save": "存储"}
+
+
+def test_collect_jsonl_missing_file() -> None:
+    """文件不存在返回空映射：会话失败时即此情形"""
+    assert collect_jsonl(str(Path(tempfile.mkdtemp()) / "nope.jsonl")) == {}
+
+
+def test_build_batch_prompt_lists_entries() -> None:
+    """提示词必须逐条列出待翻译原文，并指明目标语言"""
+    prompt = build_batch_prompt("a.rs", {"Save": "", "Open": ""}, "zh-CN")
+    assert "Save" in prompt and "Open" in prompt
+    assert "zh-CN" in prompt
+    assert "submit_translation" in prompt
+
+
+def test_write_mcp_config() -> None:
+    """mcp.json 结构必须能被 Claude Code 识别"""
+    import json
+    p = Path(tempfile.mkdtemp()) / "mcp.json"
+    write_mcp_config(str(p), "/abs/path/zedl10n/mcp_server.py")
+    cfg = json.loads(p.read_text(encoding="utf-8"))
+    entry = cfg["mcpServers"]["l10n"]
+    assert entry["command"]
+    assert "mcp_server.py" in " ".join(entry["args"])
 
 
 def main() -> int:
