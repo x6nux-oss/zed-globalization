@@ -202,30 +202,93 @@ def test_collect_candidates_only_empty_and_uncovered() -> None:
     assert got == [("a.rs", "tool_name")], got
 
 
-def test_translate_time_limit_keeps_finished_batches() -> None:
-    """到时限：已完成批次保留、未完成批次取消，返回未完成标记供工作流续翻"""
-    async def fake_batch(client, model, fp, strings, fc, sp):
-        if fp == "slow.rs":
-            await asyncio.sleep(60)
-        return {s: f"译:{s}" for s in strings}
+def test_translate_async_uses_sessions_and_validates_placeholders() -> None:
+    """会话产出的译文经占位符校验；不合格者置空留待重翻"""
+    async def fake_run_session(args):
+        from zedl10n.oc_translate import SessionResult
+        out = Path(args.out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        # 第一条占位符正确，第二条占位符被吃掉
+        (out / f"{args.batch_id}.jsonl").write_text(
+            '{"original": "Open {}", "translated": "打开 {}"}\n'
+            '{"original": "Save {}", "translated": "保存"}\n',
+            encoding="utf-8",
+        )
+        return SessionResult(
+            args.batch_id,
+            {"Open {}": "打开 {}", "Save {}": "保存"},
+            ok=True,
+        )
 
-    orig = tr._translate_batch
-    tr._translate_batch = fake_batch
+    orig = tr.run_session
+    tr.run_session = fake_run_session
     try:
         result, complete = asyncio.run(tr._translate_async(
-            {"fast.rs": {"Save": ""}, "slow.rs": {"Open": ""}},
-            {"old.rs": {"Quit": "退出"}},
+            {"a.rs": {"Open {}": "", "Save {}": ""}},
+            {},
             "incremental", "zh-CN",
             str(Path(__file__).parent / "config" / "glossary.yaml"),
-            AIConfig(base_url="http://127.0.0.1:9", api_key="x", model="m"),
-            time_limit=0.5,
+            AIConfig(base_url="", api_key="", model="m", concurrency=2),
+            time_limit=None,
         ))
     finally:
-        tr._translate_batch = orig
+        tr.run_session = orig
+
+    assert complete is True
+    assert result["a.rs"]["Open {}"] == "打开 {}", result
+    # 占位符丢失的那条被置空，下次增量会重翻
+    assert result["a.rs"]["Save {}"] == "", result
+
+
+def test_translate_async_marks_failed_batches_as_gaps() -> None:
+    """会话失败时该批条目保持缺失（等同空值），不污染已有译文"""
+    async def failing_session(args):
+        from zedl10n.oc_translate import SessionResult
+        return SessionResult(args.batch_id, ok=False, detail="模拟失败")
+
+    orig = tr.run_session
+    tr.run_session = failing_session
+    try:
+        result, complete = asyncio.run(tr._translate_async(
+            {"a.rs": {"Save": ""}},
+            {"a.rs": {"Old": "旧"}},
+            "incremental", "zh-CN",
+            str(Path(__file__).parent / "config" / "glossary.yaml"),
+            AIConfig(base_url="", api_key="", model="m", concurrency=2),
+            time_limit=None,
+        ))
+    finally:
+        tr.run_session = orig
+
+    # 失败批次的条目保持缺失（等同空值），下次增量会作为缺口重翻
+    assert result["a.rs"].get("Save", "") == ""
+    assert result["a.rs"]["Old"] == "旧", "已有译文不得被失败批次清掉"
+
+
+def test_translate_async_time_limit_keeps_finished_batches() -> None:
+    """到时限：已完成批次保留、未完成取消，返回未完成标记"""
+    async def slow_session(args):
+        from zedl10n.oc_translate import SessionResult
+        if "slow" in args.prompt:
+            await asyncio.sleep(60)
+            return SessionResult(args.batch_id, ok=True)
+        return SessionResult(args.batch_id, {"Save": "保存"}, ok=True)
+
+    orig = tr.run_session
+    tr.run_session = slow_session
+    try:
+        result, complete = asyncio.run(tr._translate_async(
+            {"slow.rs": {"Save": ""}, "fast.rs": {"Open": ""}},
+            {},
+            "incremental", "zh-CN",
+            str(Path(__file__).parent / "config" / "glossary.yaml"),
+            AIConfig(base_url="", api_key="", model="m", concurrency=2),
+            time_limit=0.0,
+        ))
+    finally:
+        tr.run_session = orig
+
     assert complete is False
-    assert result["fast.rs"] == {"Save": "译:Save"}, result
-    assert result["slow.rs"] == {}, result
-    assert result["old.rs"] == {"Quit": "退出"}, result
 
 
 def test_group_batches_by_file_accumulation() -> None:

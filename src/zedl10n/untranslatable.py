@@ -30,6 +30,9 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 
+# 禁翻清单默认路径。05 流程与翻译流程共用，集中在此便于对齐。
+DNT_PATH = "config/do_not_translate.json"
+
 # 全局状态：用于信号处理
 _shutdown_requested = False
 _current_data = None

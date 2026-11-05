@@ -9,267 +9,29 @@ import random
 import sys
 from pathlib import Path
 
-from .batch import split_batch
-from .error_codes import report as report_error
-from .prompts import (
-    SYSTEM_PROMPT_TEMPLATE,
-    XML_FALLBACK_INSTRUCTION,
-    build_consistency_fix_prompt,
-    build_fix_prompt,
-    build_numbered_instruction,
-    build_user_prompt,
-    validate_placeholders,
+from .batch import group_batches
+from .oc_translate import (
+    SessionArgs,
+    build_batch_prompt,
+    run_session,
+    write_mcp_config,
 )
+from .prompts import validate_placeholders
 from .utils import (
     AIConfig,
     ProgressBar,
     TranslationDict,
-    build_glossary_section,
     load_json,
     normalize_fullwidth,
-    parse_json_response,
-    parse_numbered_response,
-    parse_xml_response,
     save_json,
 )
 
 log = logging.getLogger(__name__)
 
 
-# 流式保活间隔：无新 chunk 超过此时长视为连接僵死（代理/负载均衡空闲
-# 超时的典型表现——非流式大响应经常在 5-10 分钟生成期被中间层掐断），
-# 主动放弃并重试，而不是干等到客户端自身超时。
-STREAM_IDLE_TIMEOUT = 120.0
-
 # 达到 --time-limit 时的退出码（EX_TEMPFAIL）：已完成部分已保存，
 # 工作流据此跳过构建，留待下次运行增量续翻
 EXIT_INCOMPLETE = 75
-
-
-async def _call_ai(
-    client: object,
-    model: str,
-    system_prompt: str,
-    user_prompt: str,
-) -> str:
-    """调用 AI API（流式），内置网络错误与流空闲超时重试。
-
-    流式的意义不在总耗时（token 量相同生成时间相同），而在连接活性：
-    chunk 持续到达证明链路存活，代理不会因"空闲超时"掐断长请求。
-    对 max_tokens=65535 的批量翻译批次，这是非流式经常 5-10 分钟断连
-    的主要解药。收到 [DONE] 后拼接完整内容，对调用方透明。
-    """
-    last_err: Exception | None = None
-    for attempt in range(5):
-        try:
-            stream = await client.chat.completions.create(  # type: ignore[attr-defined]
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0,
-                max_tokens=65535,
-                stream=True,
-                extra_body={"thinking": {"type": "disabled"}},
-            )
-            chunks: list[str] = []
-            while True:
-                try:
-                    # chunk 间隔超过 STREAM_IDLE_TIMEOUT 视为链路僵死
-                    raw = await asyncio.wait_for(
-                        stream.__anext__(), timeout=STREAM_IDLE_TIMEOUT
-                    )
-                except StopAsyncIteration:
-                    break  # 正常结束
-                if getattr(raw, "choices", None):
-                    delta = raw.choices[0].delta.content
-                    if delta:
-                        chunks.append(delta)
-            return "".join(chunks).strip()
-        except Exception as e:
-            last_err = e
-            if attempt < 4:
-                delay = (2**attempt) * 3 + random.uniform(0, 2)
-                report_error(log, e, f"重试 {attempt + 1}/5，等待 {delay:.1f}s")
-                await asyncio.sleep(delay)
-                continue
-            raise
-    raise last_err if last_err else RuntimeError("AI 调用失败：未知原因")
-
-
-async def _fetch_translation(
-    client: object,
-    model: str,
-    file_path: str,
-    strings: dict[str, str],
-    file_content: str,
-    system_prompt: str,
-) -> dict[str, str]:
-    """通过 JSON → XML(CDATA) → 编号格式 三级降级获取翻译结果"""
-    user_prompt = build_user_prompt(file_path, strings, file_content)
-
-    # 第一级: JSON 格式重试 3 次
-    for attempt in range(3):
-        try:
-            raw = await _call_ai(client, model, system_prompt, user_prompt)
-            result = parse_json_response(raw)
-            if result:
-                return result
-        except Exception as e:
-            report_error(log, e, f"翻译失败 {file_path}（JSON 级）")
-            return {}
-
-    # 第二级: XML(CDATA) 格式重试 3 次
-    xml_prompt = user_prompt + XML_FALLBACK_INSTRUCTION
-    for attempt in range(3):
-        try:
-            raw = await _call_ai(client, model, system_prompt, xml_prompt)
-            result = parse_xml_response(raw)
-            if result:
-                return result
-            log.debug("XML 解析重试 (%d/3): %s", attempt + 1, file_path)
-        except Exception as e:
-            report_error(log, e, f"翻译失败 {file_path}（XML 级）")
-            return {}
-
-    # 第三级: 编号格式重试 3 次
-    keys = list(strings.keys())
-    numbered_prompt = user_prompt + build_numbered_instruction(len(keys))
-    for attempt in range(3):
-        try:
-            raw = await _call_ai(client, model, system_prompt, numbered_prompt)
-            result = parse_numbered_response(raw, keys)
-            if result:
-                return result
-            log.debug("编号格式解析重试 (%d/3): %s", attempt + 1, file_path)
-        except Exception as e:
-            report_error(log, e, f"翻译失败 {file_path}（编号级）")
-            return {}
-
-    log.warning(
-        "[FAILED] JSON+XML+编号 均失败: %s (%d 条)",
-        file_path,
-        len(strings),
-    )
-    return {}
-
-
-async def _translate_batch(
-    client: object,
-    model: str,
-    file_path: str,
-    strings: dict[str, str],
-    file_content: str,
-    system_prompt: str,
-) -> dict[str, str]:
-    """翻译一批字符串，含占位符校验和自动重试"""
-    result = await _fetch_translation(
-        client, model, file_path, strings, file_content, system_prompt,
-    )
-    if not result:
-        return result
-
-    # 占位符校验 + 重试（最多 2 次）
-    for retry in range(2):
-        errors = validate_placeholders(result)
-        if not errors:
-            return result
-        log.debug(
-            "占位符不匹配 %d 条，重试修正 (%d/2): %s",
-            len(errors), retry + 1, file_path,
-        )
-        fix_prompt = build_fix_prompt(errors, result)
-        try:
-            raw = await _call_ai(client, model, system_prompt, fix_prompt)
-            fixed = parse_json_response(raw)
-        except Exception as e:
-            report_error(log, e, f"占位符修正请求失败 {file_path} [ZL1005]")
-            break
-        if fixed:
-            for key, val in fixed.items():
-                if key in result:
-                    result[key] = val
-
-    # 最终校验：仍有问题的条目丢弃为空字符串
-    final_errors = validate_placeholders(result)
-    for original, (src_ph, dst_ph) in final_errors.items():
-        log.warning(
-            "占位符校验失败，丢弃译文: %r (原文占位符=%s, 译文占位符=%s) [%s]",
-            original, src_ph, dst_ph, file_path,
-        )
-        result[original] = ""
-
-    return result
-
-
-def _read_source_file(file_path: str, source_root: str) -> str:
-    """读取源文件内容，找不到则返回空字符串"""
-    if not source_root:
-        return ""
-    root = Path(source_root)
-    candidates = [root / file_path]
-    if file_path.startswith("zed/"):
-        candidates.append(root / file_path[4:])
-    for p in candidates:
-        if p.exists():
-            try:
-                return p.read_text(encoding="utf-8")
-            except Exception:
-                return ""
-    return ""
-
-
-async def _ai_fix_consistency(
-    client: object,
-    model: str,
-    system_prompt: str,
-    result: TranslationDict,
-    glossary_path: str,
-) -> tuple[TranslationDict, list[str]]:
-    """用 AI 修复一致性问题，返回 (修复后结果, 修复日志)"""
-    from .consistency import build_issues_for_ai, check_consistency
-
-    issues = check_consistency(result, glossary_path)
-    if not issues:
-        return result, []
-
-    log.info("一致性检查发现 %d 个问题，调用 AI 修复", len(issues))
-    incon, glossary_v, keep_v = build_issues_for_ai(issues, result)
-    if not incon and not glossary_v and not keep_v:
-        return result, []
-
-    user_prompt = build_consistency_fix_prompt(incon, glossary_v, keep_v)
-
-    fix_log: list[str] = []
-    try:
-        raw = await _call_ai(client, model, system_prompt, user_prompt)
-        fixed = parse_json_response(raw)
-    except Exception as e:
-        report_error(log, e, "AI 一致性修复请求失败")
-        return result, fix_log
-
-    if not fixed:
-        log.warning("AI 一致性修复返回为空")
-        return result, fix_log
-
-    # 将 AI 修正结果应用到所有文件
-    for original, new_translation in fixed.items():
-        if not new_translation:
-            continue
-        applied = 0
-        for pairs in result.values():
-            if original in pairs and pairs[original]:
-                if pairs[original] != new_translation:
-                    pairs[original] = new_translation
-                    applied += 1
-        if applied:
-            fix_log.append(
-                f'AI 修复: "{original}" → "{new_translation}" '
-                f"(更新 {applied} 处)",
-            )
-
-    return result, fix_log
 
 
 async def _translate_async(
@@ -283,104 +45,139 @@ async def _translate_async(
     skip_sets: tuple[set[tuple[str, str]], set[str]] | None = None,
     time_limit: float | None = None,
 ) -> tuple[TranslationDict, bool]:
-    """异步并发翻译，返回 (结果, 是否全部完成)"""
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(
-        base_url=ai_cfg.base_url, api_key=ai_cfg.api_key, timeout=10.0
-    )
-    semaphore = asyncio.Semaphore(ai_cfg.concurrency)
-
-    glossary_section = build_glossary_section(glossary_path)
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        lang=lang,
-        glossary_section=glossary_section,
-    )
-
+    """并发跑 Claude Code 会话翻译，返回 (结果, 是否全部完成)"""
     result: TranslationDict = {fp: dict(v) for fp, v in existing.items()}
-    tasks: list[asyncio.Task] = []
     skip_covered, skip_global = skip_sets or (set(), set())
-    skipped = 0
 
+    # 只把「需要翻」的条目交给会话：已有译文与禁翻条目不进批次
+    pending: TranslationDict = {}
+    skipped = 0
     for file_path, strings in all_strings.items():
-        to_translate: dict[str, str] = {}
-        if file_path not in result:
-            result[file_path] = {}
+        todo: dict[str, str] = {}
         for s in strings:
-            # 已判定「确定无需翻译」的条目：空值不再被当成待补翻的缺口，
-            # 否则每轮增量都要把几万条代码标识符重新问一遍 AI。
+            # 已判定「确定无需翻译」的条目跳过，否则每轮增量都要把
+            # 几万条代码标识符重新问一遍 AI。
             if s in skip_global or (file_path, s) in skip_covered:
                 skipped += 1
                 continue
-            if mode == "full" or s not in result.get(file_path, {}):
-                to_translate[s] = ""
-            elif mode == "incremental" and not str(result[file_path].get(s, "")).strip():
-                # 增量模式也要补翻空值：AI 对颜色码、标识符风格的字符串偶尔
-                # 返回空串，而 "s in result" 让空值永远跳过重翻，缺口只会
-                # 越积越多（i18n/zh-CN.json 累积了 4 万+ 空值）。
-                to_translate[s] = ""
-        if not to_translate:
-            continue
-        raw_content = _read_source_file(file_path, source_root)
-        batches, file_content = split_batch(
-            to_translate, system_prompt, file_path, raw_content,
-        )
-        for batch in batches:
+            if mode == "full" or not str(
+                result.get(file_path, {}).get(s, "")
+            ).strip():
+                # 增量模式也补翻空值：AI 偶尔返回空串，而只判断键存在
+                # 会让空值永远跳过重翻，缺口越积越多。
+                todo[s] = ""
+        if todo:
+            pending[file_path] = todo
 
-            async def do_batch(
-                fp: str = file_path,
-                b: dict = batch,
-                fc: str = file_content,
-            ) -> tuple[str, dict[str, str]]:
-                async with semaphore:
-                    return fp, await _translate_batch(
-                        client, ai_cfg.model, fp, b, fc, system_prompt,
-                    )
-
-            tasks.append(asyncio.create_task(do_batch()))
-
-    total = len(tasks)
     if skipped:
         log.info("按禁翻清单跳过 %d 条", skipped)
-    log.info("共 %d 个翻译批次，并发数 %d", total, ai_cfg.concurrency)
-    pbar = ProgressBar(total, desc="翻译")
 
-    fail_count = 0
+    batches = group_batches(pending)
+    run_dir = Path("i18n/.session")
+    out_dir = run_dir / "out"
+    dnt_dir = run_dir / "dnt"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dnt_dir.mkdir(parents=True, exist_ok=True)
+
+    # mcp.json 指向仓库内的 server 脚本，用绝对路径避免 cwd 依赖
+    mcp_script = str(Path(__file__).resolve().parent / "mcp_server.py")
+    mcp_config = str(run_dir / "mcp.json")
+    write_mcp_config(mcp_config, mcp_script)
+
+    semaphore = asyncio.Semaphore(ai_cfg.concurrency)
+    untranslatable: list[dict] = []
+
+    async def do_batch(idx: int, batch: dict) -> None:
+        batch_id = f"b{idx:04d}"
+        # 一个批次可含多个文件，提示词里逐个文件分段列出
+        prompt_parts = [
+            build_batch_prompt(fp, entries, lang)
+            for fp, entries in batch.items()
+        ]
+        args = SessionArgs(
+            batch_id=batch_id,
+            prompt="\n\n".join(prompt_parts),
+            model=ai_cfg.model,
+            out_dir=str(out_dir),
+            dnt_dir=str(dnt_dir),
+            glossary_path=glossary_path,
+            mcp_config_path=mcp_config,
+        )
+        async with semaphore:
+            res = await run_session(args)
+        if not res.ok:
+            log.warning("批次 %s 失败: %s", batch_id, res.detail)
+            return
+        untranslatable.extend(res.untranslatable)
+        for fp, entries in batch.items():
+            for original in entries:
+                translated = res.translations.get(original, "")
+                result.setdefault(fp, {})[original] = translated
+
+    total = len(batches)
+    if total == 0:
+        return result, True
+    log.info("共 %d 个翻译会话，并发数 %d", total, ai_cfg.concurrency)
+
+    pbar = ProgressBar(total, desc="翻译")
+    tasks = [
+        asyncio.create_task(do_batch(i, b)) for i, b in enumerate(batches)
+    ]
     complete = True
     try:
         for coro in asyncio.as_completed(tasks, timeout=time_limit):
-            fp, translations = await coro
-            if translations:
-                result.setdefault(fp, {}).update(translations)
-            else:
-                fail_count += 1
-            pbar.update(extra=f"失败 {fail_count}")
+            await coro
+            pbar.update()
     except TimeoutError:
-        # 到时限：放弃未完成批次，已完成部分照常保存，缺口由下次增量补翻
+        # 到时限：放弃未完成会话，已完成部分照常保存，缺口由下次增量补翻
         complete = False
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
     pbar.finish()
 
+    # 占位符校验：不合格条目置空留待下次重翻。
+    # 无降级通道后再开会话修占位符等于引入新一层不可控，
+    # 空值重翻是已有机制，代价可控。
+    for fp in result:
+        errors = validate_placeholders(result[fp])
+        for original, (src_ph, dst_ph) in errors.items():
+            log.warning(
+                "占位符校验失败，丢弃译文: %r (原文=%s, 译文=%s) [%s]",
+                original, src_ph, dst_ph, fp,
+            )
+            result[fp][original] = ""
+
+    if untranslatable:
+        _merge_untranslatable(untranslatable)
+
     if not complete:
         log.warning(
-            "达到翻译时限 %.0fs，已完成 %d/%d 批次，其余留待下次继续",
-            time_limit, pbar.current, total,
+            "达到翻译时限 %.0fs，未完成的批次留待下次继续", time_limit,
         )
-        return result, False
+    return result, complete
 
-    # AI 一致性修复（最多 2 轮）
-    for fix_round in range(2):
-        result, ai_fix_log = await _ai_fix_consistency(
-            client, ai_cfg.model, system_prompt, result, glossary_path,
-        )
-        for msg in ai_fix_log:
-            log.info("一致性修复 (第 %d 轮): %s", fix_round + 1, msg)
-        if not ai_fix_log:
-            break
 
-    return result, True
+def _merge_untranslatable(records: list[dict]) -> None:
+    """把 agent 标记的禁翻条目并入 do_not_translate.json。
+
+    合并而非覆盖：清单由 05 流程维护，这里只做增量补充。
+    清单结构为 {global_entries: [{original, reason}], entries: [...]}，
+    全局条目写 global_entries，与 05 流程产出的形状保持一致。
+    """
+    from .untranslatable import DNT_PATH, _load_registry
+
+    data, _, covered_global = _load_registry(DNT_PATH)
+    for rec in records:
+        original = rec.get("original")
+        if not original or original in covered_global:
+            continue
+        data["global_entries"].append({
+            "original": original,
+            "reason": f"agent: {rec.get('reason', 'unknown')}",
+        })
+        covered_global.add(original)
+    save_json(data, DNT_PATH)
 
 
 def translate_all(
