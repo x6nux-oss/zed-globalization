@@ -16,7 +16,9 @@ dependencies = [
 [project.optional-dependencies]
 excel = ["pandas>=2.0", "openpyxl>=3.1"]
 ai = ["openai>=1.0,<3.8"]
-all = ["zedl10n[excel,ai]"]
+# 会话式翻译：mcp 固定 <3，该 SDK v2 已发生破坏性改名（FastMCP → MCPServer）
+l10n = ["mcp>=2.2.0,<3"]
+all = ["zedl10n[excel,ai,l10n]"]
 
 [project.scripts]
 zedl10n = "zedl10n.cli:main"

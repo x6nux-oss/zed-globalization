@@ -6,6 +6,7 @@
 
 import asyncio
 import logging
+import tempfile
 import sys
 from pathlib import Path
 
@@ -270,6 +271,74 @@ def test_group_batches_preserves_all_entries() -> None:
         for fp, entries in b.items():
             merged.setdefault(fp, {}).update(entries)
     assert merged == strings
+
+
+def test_mcp_record_translation_appends_jsonl() -> None:
+    """每次提交追加一行 JSONL，不覆盖已有内容"""
+    out = Path(tempfile.mkdtemp()) / "out"
+    from zedl10n.mcp_server import record_translation
+    record_translation(str(out), "b1", "Save", "保存")
+    record_translation(str(out), "b1", "Open", "打开")
+
+    import json
+    lines = (out / "b1.jsonl").read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 2, lines
+    assert json.loads(lines[0]) == {"original": "Save", "translated": "保存"}
+    assert json.loads(lines[1]) == {"original": "Open", "translated": "打开"}
+
+
+def test_mcp_record_translation_survives_interrupt() -> None:
+    """会话中断后已写条目仍在：追加写入而非整文件重写"""
+    out = Path(tempfile.mkdtemp()) / "out"
+    from zedl10n.mcp_server import record_translation
+    record_translation(str(out), "b2", "A", "甲")
+    # 模拟中断：进程消失，但文件内容已在磁盘
+    content = (out / "b2.jsonl").read_text(encoding="utf-8")
+    assert "甲" in content
+
+
+def test_mcp_lookup_term_terms_and_keep_original() -> None:
+    """terms 返回约定译法；keep_original 返回保持原文"""
+    g = Path(tempfile.mkdtemp()) / "glossary.yaml"
+    g.write_text(
+        "terms:\n  workspace: 工作区\n"
+        "keep_original:\n  - Zed\n  - GitHub\n",
+        encoding="utf-8",
+    )
+    from zedl10n.mcp_server import lookup_term
+    assert "工作区" in lookup_term(str(g), "workspace")
+    assert "保持原文" in lookup_term(str(g), "Zed")
+    assert "未收录" in lookup_term(str(g), "nonexistent_term")
+
+
+def test_mcp_lookup_term_missing_file_is_not_fatal() -> None:
+    """词表缺失时返回未收录，而非抛异常中断翻译"""
+    from zedl10n.mcp_server import lookup_term
+    missing = Path(tempfile.mkdtemp()) / "nope.yaml"
+    assert "未收录" in lookup_term(str(missing), "workspace")
+
+
+def test_mcp_record_untranslatable() -> None:
+    """标记禁翻写入独立文件，与译文分开"""
+    dnt = Path(tempfile.mkdtemp()) / "dnt"
+    from zedl10n.mcp_server import record_untranslatable
+    record_untranslatable(str(dnt), "b3", "tool_name", "identifier")
+
+    import json
+    rec = json.loads((dnt / "b3.jsonl").read_text(encoding="utf-8").strip())
+    assert rec == {"original": "tool_name", "reason": "identifier"}
+
+
+def test_mcp_server_exposes_three_tools() -> None:
+    """server 必须暴露三个 tool，名称与 agent 白名单一致"""
+    import asyncio
+    from zedl10n.mcp_server import build_server
+    # 用公共 list_tools，避免依赖 SDK 私有属性
+    tools = asyncio.run(build_server().list_tools())
+    names = {t.name for t in tools}
+    assert names == {
+        "glossary_lookup", "submit_translation", "mark_untranslatable",
+    }, names
 
 
 def main() -> int:
