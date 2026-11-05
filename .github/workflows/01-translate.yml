@@ -189,7 +189,19 @@ jobs:
           python-version: "3.12"
 
       - name: 安装依赖
-        run: pip install ".[ai]"
+        run: pip install ".[l10n]"
+
+      - name: 安装 Claude Code（版本固定，升级前需重跑冒烟脚本）
+        run: npm install -g @anthropic-ai/claude-code@2.1.280
+
+      - name: 校验 Claude Code 版本
+        run: |
+          INSTALLED=$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          echo "已安装 Claude Code: $INSTALLED"
+          if [ "$INSTALLED" != "2.1.280" ]; then
+            echo "::error::Claude Code 版本不符，期望 2.1.280，实际 $INSTALLED"
+            exit 1
+          fi
 
       - name: 从 i18n 分支获取数据
         run: |
@@ -412,6 +424,7 @@ jobs:
       - name: AI 翻译（时限：任务开始后 5h50m）
         id: translate
         env:
+          # ── AI 服务接入 ──────────────────────────────────────────
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
@@ -419,9 +432,27 @@ jobs:
           VERSION: ${{ steps.params.outputs.VERSION }}
           TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
           EXTRACT_MODE: ${{ steps.params.outputs.EXTRACT_MODE }}
+          # ── Claude Code 接入 ─────────────────────────────────────
+          ANTHROPIC_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.AI_API_KEY }}
+          # 九个变量强制覆盖全部模型槽位，避免任何内置模型兜底。
+          # SMALL_FAST 与 SUBAGENT 尤其关键：不覆盖会偷偷请求未指定模型。
+          ANTHROPIC_MODEL: ${{ secrets.AI_MODEL }}
+          ANTHROPIC_DEFAULT_MODEL: ${{ secrets.AI_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ secrets.AI_MODEL }}
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ secrets.AI_MODEL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ secrets.AI_MODEL }}
+          ANTHROPIC_DEFAULT_FABLE_MODEL: ${{ secrets.AI_MODEL }}
+          ANTHROPIC_SMALL_FAST_MODEL: ${{ secrets.AI_MODEL }}
+          CLAUDE_CODE_SUBAGENT_MODEL: ${{ secrets.AI_MODEL }}
+          CLAUDE_CODE_NO_MODEL_FALLBACK: "1"
         run: |
           BUDGET=$(( JOB_START + 21000 - $(date +%s) ))
           echo "翻译剩余时限: ${BUDGET}s"
+
+          # AI_BASE_URL 面向 OpenAI 兼容协议（含 /v1），Claude Code 需要裸域名
+          export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL%/v1}"
+          echo "Anthropic base: $ANTHROPIC_BASE_URL"
 
           set +e
           zedl10n translate \
