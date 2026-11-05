@@ -67,6 +67,7 @@ jobs:
   # ===========================================================================
   versioning:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     outputs:
       version: ${{ steps.set_vars.outputs.v }}
       upstream_version: ${{ steps.set_vars.outputs.upstream_v }}
@@ -175,6 +176,7 @@ jobs:
   # ===========================================================================
   prepare:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     needs: versioning
     if: ${{ needs.versioning.outputs.should_release == 'true' }}
     env:
@@ -303,6 +305,7 @@ jobs:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' && needs.versioning.outputs.run_windows == 'true' }}
     runs-on: windows-latest
+    timeout-minutes: 360
     env:
       SCCACHE_DIR: D:\c\sccache
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -656,6 +659,7 @@ jobs:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' && needs.versioning.outputs.run_windows == 'true' }}
     runs-on: windows-11-arm
+    timeout-minutes: 360
     env:
       SCCACHE_DIR: C:\cc\sccache
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -1005,6 +1009,7 @@ jobs:
     needs: [versioning, build-windows-x86_64, build-windows-aarch64]
     if: ${{ needs.versioning.outputs.should_release == 'true' && needs.versioning.outputs.run_windows == 'true' }}
     runs-on: windows-latest
+    timeout-minutes: 360
     env:
       BUILD_VERSION: ${{ needs.versioning.outputs.version }}
       LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
@@ -1082,6 +1087,7 @@ jobs:
     # users cannot start zedg at all. 22.04 ships glibc 2.35, so anything
     # newer than it runs the artifact. All build deps below exist on 22.04.
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
     env:
       SCCACHE_DIR: /home/runner/.cache/sccache
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -1557,6 +1563,7 @@ jobs:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' && needs.versioning.outputs.run_macos == 'true' }}
     runs-on: macos-latest
+    timeout-minutes: 360
     env:
       SCCACHE_DIR: /Users/runner/Library/Caches/Mozilla.sccache
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -1797,6 +1804,7 @@ jobs:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' && needs.versioning.outputs.run_macos == 'true' }}
     runs-on: macos-15-intel
+    timeout-minutes: 360
     env:
       SCCACHE_DIR: /Users/runner/Library/Caches/Mozilla.sccache
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -2026,6 +2034,7 @@ jobs:
     needs: [versioning, build-macos-aarch64, build-macos-x86_64]
     if: ${{ needs.versioning.outputs.should_release == 'true' && needs.versioning.outputs.run_macos == 'true' }}
     runs-on: macos-latest
+    timeout-minutes: 360
     env:
       BUILD_VERSION: ${{ needs.versioning.outputs.upstream_version }}
       LANG_LOWER: ${{ needs.versioning.outputs.lang_lower }}
@@ -2146,6 +2155,7 @@ jobs:
     needs: [versioning, prepare]
     if: ${{ needs.versioning.outputs.should_release == 'true' && needs.versioning.outputs.run_linux_arm64 == 'true' }}
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
     env:
       SCCACHE_DIR: /home/runner/.cache/sccache
       SCCACHE_IDLE_TIMEOUT: "0"
@@ -2559,6 +2569,7 @@ jobs:
   # ===========================================================================
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     needs: [versioning, build-windows-x86_64, build-windows-aarch64, build-windows-msi, build-linux-x86_64, build-linux-aarch64, build-macos-universal]
     if: >-
       always() &&

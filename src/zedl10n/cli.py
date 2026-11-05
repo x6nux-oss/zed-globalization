@@ -95,6 +95,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--do-not-translate", default="",
         help="禁止翻译列表 JSON 路径，清单内条目跳过翻译（加速增量）",
     )
+    p_tr.add_argument(
+        "--time-limit", type=float, default=None,
+        help="翻译时限（秒），到时保存已完成部分并以退出码 75 结束，留待下次增量续翻",
+    )
     _add_ai_args(p_tr)
 
     # --- replace ---

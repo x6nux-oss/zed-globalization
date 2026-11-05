@@ -53,6 +53,7 @@ jobs:
   # ====== 检测 Zed 是否发布新版本（同时检查 Stable 和 Pre-release） ======
   check-version:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     outputs:
       matrix: ${{ steps.check.outputs.matrix }}
       has_update: ${{ steps.check.outputs.has_update }}
@@ -172,10 +173,15 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.has_update == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     strategy:
       matrix: ${{ fromJSON(needs.check-version.outputs.matrix) }}
       max-parallel: 1 # 串行执行，避免 i18n 分支推送冲突
     steps:
+      # 翻译时限从任务开始算，留余量给保存与推送，避免撞 6h 上限被强杀丢进度
+      - name: 记录任务开始时间
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -403,7 +409,8 @@ jobs:
           fi
           echo "翻译文件: $TRANS_FILE ($(wc -c < "$TRANS_FILE") bytes)"
 
-      - name: AI 翻译
+      - name: AI 翻译（时限：任务开始后 5h50m）
+        id: translate
         env:
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -413,6 +420,10 @@ jobs:
           TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
           EXTRACT_MODE: ${{ steps.params.outputs.EXTRACT_MODE }}
         run: |
+          BUDGET=$(( JOB_START + 21000 - $(date +%s) ))
+          echo "翻译剩余时限: ${BUDGET}s"
+
+          set +e
           zedl10n translate \
             --input string.json \
             --output "i18n/${VERSION}/${TARGET_LANG}.json" \
@@ -421,9 +432,23 @@ jobs:
             --source-root zed \
             --mode "$EXTRACT_MODE" \
             --lang "$TARGET_LANG" \
-            --do-not-translate config/do_not_translate.json
+            --do-not-translate config/do_not_translate.json \
+            --time-limit "$BUDGET"
+          CODE=$?
+          set -e
+
+          # 75 = 到时限，已完成部分已保存：推送进度但不构建，下次运行增量续翻
+          if [ "$CODE" -eq 75 ]; then
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::翻译达到时限，已保存进度，等待下次运行继续"
+          elif [ "$CODE" -ne 0 ]; then
+            exit "$CODE"
+          else
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: 修复占位符错误并清理无效条目
+        if: steps.translate.outputs.complete == 'true'
         env:
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -436,6 +461,8 @@ jobs:
             --source-root zed
 
       - name: 推送到 i18n 分支
+        env:
+          COMPLETE: ${{ steps.translate.outputs.complete }}
         run: |
           cp string.json string_context.json scan_result.json /tmp/
           cp -r i18n/ /tmp/i18n-result/
@@ -457,12 +484,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add string.json string_context.json scan_result.json i18n/
-          git diff --cached --quiet || git commit -m "feat(i18n): 更新提取与翻译结果"
+          if [ "$COMPLETE" = "true" ]; then
+            MSG="feat(i18n): 更新提取与翻译结果"
+          else
+            MSG="feat(i18n): 保存翻译进度（达到时限，下次继续）"
+          fi
+          git diff --cached --quiet || git commit -m "$MSG"
           git push origin i18n
 
-      # 定时触发或手动+chain 时链式调用构建
+      # 定时触发或手动+chain 时链式调用构建；翻译未完成不构建，否则发布
+      # 半成品且 check-version 会视为已构建，不再续翻
       - name: 触发构建工作流
-        if: github.event_name == 'schedule' || inputs.chain == true
+        if: (github.event_name == 'schedule' || inputs.chain == true) && steps.translate.outputs.complete == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

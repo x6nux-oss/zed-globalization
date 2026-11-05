@@ -4,12 +4,14 @@
 直接运行: python3 test_zedl10n.py
 """
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+from zedl10n import translate as tr  # noqa: E402
 from zedl10n.prompts import validate_placeholders  # noqa: E402
 from zedl10n.replace import (  # noqa: E402
     _escape_for_rust_source, _find_protected_ranges, _replace_skip_protected,
@@ -17,7 +19,7 @@ from zedl10n.replace import (  # noqa: E402
 from zedl10n.untranslatable import (  # noqa: E402
     collect_candidates, load_skip_sets, rule_verdict,
 )
-from zedl10n.utils import parse_json_response  # noqa: E402
+from zedl10n.utils import AIConfig, parse_json_response  # noqa: E402
 
 
 def translate(content: str, original: str, translated: str) -> str:
@@ -193,6 +195,32 @@ def test_collect_candidates_only_empty_and_uncovered() -> None:
     covered_global = {"globally_skipped"}
     got = collect_candidates(translations, covered, covered_global)
     assert got == [("a.rs", "tool_name")], got
+
+
+def test_translate_time_limit_keeps_finished_batches() -> None:
+    """到时限：已完成批次保留、未完成批次取消，返回未完成标记供工作流续翻"""
+    async def fake_batch(client, model, fp, strings, fc, sp):
+        if fp == "slow.rs":
+            await asyncio.sleep(60)
+        return {s: f"译:{s}" for s in strings}
+
+    orig = tr._translate_batch
+    tr._translate_batch = fake_batch
+    try:
+        result, complete = asyncio.run(tr._translate_async(
+            {"fast.rs": {"Save": ""}, "slow.rs": {"Open": ""}},
+            {"old.rs": {"Quit": "退出"}},
+            "incremental", "zh-CN",
+            str(Path(__file__).parent / "config" / "glossary.yaml"),
+            AIConfig(base_url="http://127.0.0.1:9", api_key="x", model="m"),
+            time_limit=0.5,
+        ))
+    finally:
+        tr._translate_batch = orig
+    assert complete is False
+    assert result["fast.rs"] == {"Save": "译:Save"}, result
+    assert result["slow.rs"] == {}, result
+    assert result["old.rs"] == {"Quit": "退出"}, result
 
 
 def main() -> int:

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import random
+import sys
 from pathlib import Path
 
 from .batch import split_batch
@@ -39,6 +40,10 @@ log = logging.getLogger(__name__)
 # 超时的典型表现——非流式大响应经常在 5-10 分钟生成期被中间层掐断），
 # 主动放弃并重试，而不是干等到客户端自身超时。
 STREAM_IDLE_TIMEOUT = 120.0
+
+# 达到 --time-limit 时的退出码（EX_TEMPFAIL）：已完成部分已保存，
+# 工作流据此跳过构建，留待下次运行增量续翻
+EXIT_INCOMPLETE = 75
 
 
 async def _call_ai(
@@ -276,11 +281,14 @@ async def _translate_async(
     ai_cfg: AIConfig,
     source_root: str = "",
     skip_sets: tuple[set[tuple[str, str]], set[str]] | None = None,
-) -> TranslationDict:
-    """异步并发翻译"""
+    time_limit: float | None = None,
+) -> tuple[TranslationDict, bool]:
+    """异步并发翻译，返回 (结果, 是否全部完成)"""
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(base_url=ai_cfg.base_url, api_key=ai_cfg.api_key)
+    client = AsyncOpenAI(
+        base_url=ai_cfg.base_url, api_key=ai_cfg.api_key, timeout=10.0
+    )
     semaphore = asyncio.Semaphore(ai_cfg.concurrency)
 
     glossary_section = build_glossary_section(glossary_path)
@@ -338,14 +346,29 @@ async def _translate_async(
     pbar = ProgressBar(total, desc="翻译")
 
     fail_count = 0
-    for coro in asyncio.as_completed(tasks):
-        fp, translations = await coro
-        if translations:
-            result.setdefault(fp, {}).update(translations)
-        else:
-            fail_count += 1
-        pbar.update(extra=f"失败 {fail_count}")
+    complete = True
+    try:
+        for coro in asyncio.as_completed(tasks, timeout=time_limit):
+            fp, translations = await coro
+            if translations:
+                result.setdefault(fp, {}).update(translations)
+            else:
+                fail_count += 1
+            pbar.update(extra=f"失败 {fail_count}")
+    except TimeoutError:
+        # 到时限：放弃未完成批次，已完成部分照常保存，缺口由下次增量补翻
+        complete = False
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     pbar.finish()
+
+    if not complete:
+        log.warning(
+            "达到翻译时限 %.0fs，已完成 %d/%d 批次，其余留待下次继续",
+            time_limit, pbar.current, total,
+        )
+        return result, False
 
     # AI 一致性修复（最多 2 轮）
     for fix_round in range(2):
@@ -357,7 +380,7 @@ async def _translate_async(
         if not ai_fix_log:
             break
 
-    return result
+    return result, True
 
 
 def translate_all(
@@ -370,8 +393,9 @@ def translate_all(
     ai_cfg: AIConfig | None = None,
     source_root: str = "",
     do_not_translate: str = "",
-) -> None:
-    """同步入口"""
+    time_limit: float | None = None,
+) -> bool:
+    """同步入口，返回是否全部完成（False 表示达到 time_limit 中途停止）"""
     if ai_cfg is None:
         ai_cfg = AIConfig()
     ai_cfg.validate()
@@ -388,10 +412,10 @@ def translate_all(
             len(skip_sets[0]), len(skip_sets[1]),
         )
 
-    result = asyncio.run(
+    result, complete = asyncio.run(
         _translate_async(
             all_strings, existing, mode, lang,
-            glossary_path, ai_cfg, source_root, skip_sets,
+            glossary_path, ai_cfg, source_root, skip_sets, time_limit,
         )
     )
     # 全角 ASCII 符号统一转半角，避免破坏 Rust 源码语法
@@ -409,6 +433,7 @@ def translate_all(
 
     save_json(result, output_path)
     log.info("翻译结果已保存: %s", output_path)
+    return complete
 
 
 def run(args: argparse.Namespace) -> None:
@@ -419,7 +444,7 @@ def run(args: argparse.Namespace) -> None:
         model=args.model,
         concurrency=args.concurrency,
     )
-    translate_all(
+    complete = translate_all(
         args.input,
         args.output,
         args.context,
@@ -429,4 +454,7 @@ def run(args: argparse.Namespace) -> None:
         ai_cfg,
         source_root=getattr(args, "source_root", ""),
         do_not_translate=getattr(args, "do_not_translate", ""),
+        time_limit=getattr(args, "time_limit", None),
     )
+    if not complete:
+        sys.exit(EXIT_INCOMPLETE)

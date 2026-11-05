@@ -37,6 +37,7 @@ permissions:
 jobs:
   update-bucket:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'release'
