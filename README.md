@@ -20,7 +20,7 @@
 
 | 平台 | 文件 | 安装方式 |
 |------|------|---------|
-| macOS (Universal) | `zedg-zh-cn-macos-universal-*.dmg` | `brew tap x6nux-oss/zedg && brew install --cask zedg`（自动按架构选包，[更多方式](#macos-安装)） |
+| macOS (Universal) | `zedg-zh-cn-macos-universal-*.dmg` | `brew install --cask x6nux-oss/zedg/zedg`（自动按架构选包，[更多方式](#macos-安装)） |
 | macOS (Apple Silicon) | `zedg-zh-cn-macos-aarch64-*.dmg` | DMG 手动安装 |
 | macOS (Intel) | `zedg-zh-cn-macos-x86_64-*.dmg` | DMG 手动安装 |
 | Windows (x64) | `zedg-zh-cn-windows-x86_64-*.zip` | `scoop install zedg`（[更多方式](#windows-scoop-安装)） |
@@ -38,8 +38,7 @@
 
 ```bash
 # 首次安装
-brew tap x6nux-oss/zedg
-brew install --cask zedg
+brew install --cask x6nux-oss/zedg/zedg
 
 # 手动更新
 brew update && brew upgrade --cask zedg
@@ -48,8 +47,7 @@ brew update && brew upgrade --cask zedg
 **预览版（Pre-release）：**
 
 ```bash
-brew tap x6nux-oss/zedg
-brew install --cask zedg-preview
+brew install --cask x6nux-oss/zedg/zedg-preview
 ```
 
 > **自动更新（可选）：** 启用后 Homebrew 会每 12 小时自动检查并升级**所有**已安装的 formulae 和 cask（不支持仅指定单个包）。
