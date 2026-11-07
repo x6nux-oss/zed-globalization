@@ -318,9 +318,12 @@ async def run_session(args: SessionArgs) -> SessionResult:
     # 判定会话可能「一条都不标记」——整批都该翻译是合法结论。
     # 这种情况靠 report_judgement 的结论行区分，不能当成失败。
     if not translations and not untranslatable and not judged:
-        return SessionResult(
-            args.batch_id, ok=False, detail="会话未产出任何结果",
-        )
+        # 带上 stderr，否则「什么都没产出」根本无从排查
+        tail = (stderr or b"").decode("utf-8", "replace").strip()[-600:]
+        detail = "会话未产出任何结果"
+        if tail:
+            detail += f" | stderr: {tail}"
+        return SessionResult(args.batch_id, ok=False, detail=detail)
     return SessionResult(
         args.batch_id, translations, untranslatable, ok=True, judged=judged,
     )

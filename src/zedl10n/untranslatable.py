@@ -142,6 +142,12 @@ def rule_verdict(s: str) -> str | None:
 # 单批送审的字符预算，判定任务比翻译轻，可以放得比翻译批次大
 _BATCH_CHARS = 100000
 
+# 并发会话上限。每个 claude 会话是独立子进程（内含 MCP server），
+# 实测常驻约 1.5GB 内存。GitHub runner 通常 7~16GB，取 6 留足余量。
+# 与 translate 的 AI_CONCURRENCY 不同：那边默认 10，这里必须硬性封顶——
+# 05 的默认值是 100，直接照用会 OOM。
+MAX_CONCURRENT_SESSIONS = 6
+
 
 def _build_batches(
     items: list[tuple[str, str]],
@@ -372,9 +378,19 @@ async def _judge_all(
         mcp_config, str(Path(__file__).resolve().parent / "mcp_server.py"),
     )
 
-    semaphore = asyncio.Semaphore(ai_cfg.concurrency)
+    # 每个 claude 会话是独立子进程（含 MCP server），实测约 1.5GB 内存。
+    # GitHub runner 只有 7~16GB，并发过高会 OOM——表现为进程启动成功但
+    # 无任何产出。这里硬性封顶，忽略过高的配置值。
+    concurrency = min(ai_cfg.concurrency, MAX_CONCURRENT_SESSIONS)
+    if concurrency < ai_cfg.concurrency:
+        log.warning(
+            "并发从 %d 降到 %d：每个会话约 1.5GB 内存，过高会 OOM",
+            ai_cfg.concurrency, concurrency,
+        )
+    semaphore = asyncio.Semaphore(concurrency)
     batches = _build_batches(items)
-    log.info("AI 判定: %d 条，拆分为 %d 批", len(items), len(batches))
+    log.info("AI 判定: %d 条，拆分为 %d 批，并发 %d",
+             len(items), len(batches), concurrency)
 
     async def one(
         idx: int, fp: str, strings: list[str],
@@ -473,9 +489,16 @@ async def _recheck_entries(
         mcp_config, str(Path(__file__).resolve().parent / "mcp_server.py"),
     )
 
-    semaphore = asyncio.Semaphore(ai_cfg.concurrency)
+    concurrency = min(ai_cfg.concurrency, MAX_CONCURRENT_SESSIONS)
+    if concurrency < ai_cfg.concurrency:
+        log.warning(
+            "复查并发从 %d 降到 %d：每个会话约 1.5GB 内存，过高会 OOM",
+            ai_cfg.concurrency, concurrency,
+        )
+    semaphore = asyncio.Semaphore(concurrency)
     batches = _build_batches(items)
-    log.info("复查：%d 条，拆分为 %d 批", len(items), len(batches))
+    log.info("复查：%d 条，拆分为 %d 批，并发 %d",
+             len(items), len(batches), concurrency)
 
     # 每批的判定结果：batch_id -> 被判定为「无需翻译」的原文集合
     confirmed: dict[int, set[str]] = {}
