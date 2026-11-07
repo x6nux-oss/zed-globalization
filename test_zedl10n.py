@@ -770,6 +770,24 @@ def test_is_user_visible_handles_empty_error_impl() -> None:
         "Authentication required", "c.rs", str(td)) is True
 
 
+def test_build_judge_prompt_lists_entries() -> None:
+    """判定提示词要列出待判定条目，并要求一次 tool 调用交齐"""
+    from zedl10n.untranslatable import build_judge_prompt
+
+    prompt = build_judge_prompt("a.rs", ["tool_name", "Some UI Text"])
+    assert "tool_name" in prompt and "Some UI Text" in prompt
+    assert "mark_untranslatables" in prompt
+    assert "a.rs" in prompt
+
+
+def test_judge_prompt_includes_source_context() -> None:
+    """源码上下文内联，agent 无需读文件"""
+    from zedl10n.untranslatable import build_judge_prompt
+
+    prompt = build_judge_prompt("a.rs", ["x"], "fn main() {}")
+    assert "fn main() {}" in prompt
+
+
 def main() -> int:
     logging.disable(logging.WARNING)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

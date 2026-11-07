@@ -139,29 +139,6 @@ def rule_verdict(s: str) -> str | None:
 # AI 判定：规则拿不准的交给模型，reason 沿用清单里既有的分类词汇
 # ---------------------------------------------------------------------------
 
-_AI_SYSTEM_PROMPT = """你在审查 Zed 代码编辑器源码中提取出的字符串字面量，\
-判断每条是否需要翻译成中文。
-
-判定为「无需翻译」的，返回一个分类标识；需要翻译的，返回空字符串。
-
-可用分类：
-- api_identifier: 协议/API 字段名、命令名、语言与模型标识符
-- serialization: 序列化标签、持久化类型名、枚举判别值
-- match_arm: 用于 match/switch 分支比较的字面量
-- string_comparison: 参与 == 或 contains 比较的字面量
-- test_assertion: 单元测试里的断言消息与测试夹具数据
-- code_snippet: 代码片段、SQL、shell 命令、正则、配置模板
-- format_spec: 编译器/链接器参数、格式说明符、颜色码
-- telemetry: 埋点事件名与属性名
-
-判定原则（重要）：
-1. 只有确信该字符串永远不会出现在用户界面上时，才给出分类。
-2. 拿不准就返回空字符串——漏判只是少省一点开销，误判会让真正的界面\
-文案永远得不到翻译。
-3. 错误提示、按钮文案、菜单项、日志中面向用户的说明，一律返回空字符串。
-
-只输出 JSON 对象，key 为原文，value 为分类标识或空字符串，不要任何解释。"""
-
 # 单批送审的字符预算，判定任务比翻译轻，可以放得比翻译批次大
 _BATCH_CHARS = 100000
 
@@ -192,28 +169,29 @@ def _build_batches(
     return batches
 
 
-async def _judge_batch(
-    client: object, model: str, file_path: str, strings: list[str],
-) -> dict[str, str]:
-    """判定一批字符串，返回 {原文: 分类}，只含判定为无需翻译的条目。"""
-    from .translate import _call_ai
-    from .utils import parse_json_response
+def build_judge_prompt(
+    file_path: str, strings: list[str], source_snippet: str = "",
+) -> str:
+    """构建判定提示词。
 
-    payload = json.dumps({s: "" for s in strings}, ensure_ascii=False)
-    user_prompt = f"文件: {file_path}\n\n待判定:\n```json\n{payload}\n```"
-    try:
-        raw = await _call_ai(client, model, _AI_SYSTEM_PROMPT, user_prompt)
-    except Exception as e:
-        from .error_codes import report as report_error
-        report_error(log, e, f"判定请求失败 {file_path}")
-        return {}
-
-    result = parse_json_response(raw)
-    known = set(strings)
-    return {
-        s: reason for s, reason in result.items()
-        if s in known and reason.strip()
-    }
+    与翻译一致：上下文内联、要求一次 tool 调用交齐，避免往返开销。
+    """
+    entries = "\n".join(f"- {s}" for s in strings)
+    source_block = (
+        f"\n## 源码上下文\n```rust\n{source_snippet}\n```\n"
+        if source_snippet else ""
+    )
+    return (
+        f"判断下面 {len(strings)} 条从 Zed 源码提取的字符串里，"
+        f"哪些**永远不需要翻译**（纯代码标识符）。\n"
+        f"它们来自 {file_path}。\n"
+        f"{source_block}\n"
+        f"## 工作方式（重要）\n"
+        f"每次 tool 调用都是一轮模型往返。通读整批后，调 **一次** "
+        f"`mark_untranslatables`，把判定为无需翻译的条目一次性传入。\n"
+        f"需要翻译的条目**不要提交**。拿不准的也不要提交。\n\n"
+        f"## 待判定条目（共 {len(strings)} 条）\n{entries}\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -368,24 +346,63 @@ async def _judge_all(
     ai_cfg: AIConfig,
     data: dict,
     dnt_path: str,
+    source_root: str = "",
 ) -> int:
-    """并发调用 AI 判定，每完成一批立即追加到 data["entries"] 并保存进度，返回判定总数。"""
-    from openai import AsyncOpenAI
+    """并发跑 Claude Code 判定会话，每完成一批立即追加并保存进度，返回判定总数。
 
-    client = AsyncOpenAI(base_url=ai_cfg.base_url, api_key=ai_cfg.api_key)
+    与翻译共用同一套会话机制（oc_translate），只是换 agent 定义与
+    MCP tool：判定用 classifier + mark_untranslatables，结果同样落 JSONL。
+    """
+    from .oc_translate import (
+        SessionArgs, collect_untranslatable, load_source_snippet,
+        run_session, write_mcp_config,
+    )
+
+    run_dir = Path("i18n/.judge")
+    out_dir = run_dir / "out"
+    dnt_dir = run_dir / "dnt"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dnt_dir.mkdir(parents=True, exist_ok=True)
+    mcp_config = str(run_dir / "mcp.json")
+    write_mcp_config(
+        mcp_config, str(Path(__file__).resolve().parent / "mcp_server.py"),
+    )
+
     semaphore = asyncio.Semaphore(ai_cfg.concurrency)
     batches = _build_batches(items)
     log.info("AI 判定: %d 条，拆分为 %d 批", len(items), len(batches))
 
-    async def one(fp: str, strings: list[str]) -> tuple[str, dict[str, str]]:
-        # 检查是否收到关闭信号
+    async def one(
+        idx: int, fp: str, strings: list[str],
+    ) -> tuple[str, dict[str, str]]:
         if _shutdown_requested:
             log.info("收到关闭信号，停止处理新批次")
             return fp, {}
+        batch_id = f"j{idx:04d}"
+        prompt = build_judge_prompt(
+            fp, strings, load_source_snippet(source_root, fp),
+        )
+        args = SessionArgs(
+            batch_id=batch_id, prompt=prompt, model=ai_cfg.model,
+            out_dir=str(out_dir), dnt_dir=str(dnt_dir),
+            glossary_path="", mcp_config_path=mcp_config,
+            agent="classifier",
+        )
         async with semaphore:
-            return fp, await _judge_batch(client, ai_cfg.model, fp, strings)
+            res = await run_session(args)
+        if not res.ok:
+            log.warning("判定批次 %s 失败: %s", batch_id, res.detail)
+        # 判定结果落在 dnt JSONL：{original, reason}
+        return fp, {
+            r["original"]: r.get("reason", "unknown")
+            for r in res.untranslatable
+            if r.get("original") in set(strings)
+        }
 
-    tasks = [asyncio.create_task(one(fp, ss)) for fp, ss in batches]
+    tasks = [
+        asyncio.create_task(one(i, fp, ss))
+        for i, (fp, ss) in enumerate(batches)
+    ]
     judged_count = 0
     pbar = ProgressBar(len(tasks), desc="判定")
     for coro in asyncio.as_completed(tasks):
@@ -478,7 +495,9 @@ def mark_untranslatable(
         if ai_cfg is None:
             ai_cfg = AIConfig()
         # _judge_all 现在直接追加到 data 并返回判定总数
-        by_ai = asyncio.run(_judge_all(undecided, ai_cfg, data, dnt_path))
+        by_ai = asyncio.run(
+            _judge_all(undecided, ai_cfg, data, dnt_path, source_root),
+        )
         added_count += by_ai
 
     # 最终排序并保存

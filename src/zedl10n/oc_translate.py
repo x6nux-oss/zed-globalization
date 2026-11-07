@@ -38,6 +38,8 @@ class SessionArgs:
     mcp_config_path: str
     timeout: float = SESSION_TIMEOUT
     claude_bin: str = CLAUDE_BIN
+    # 会话使用的 agent 定义：翻译用 translator，禁翻判定用 classifier
+    agent: str = "translator"
 
 
 @dataclass
@@ -225,7 +227,7 @@ async def run_session(args: SessionArgs) -> SessionResult:
     # 实测报 [Errno 7] Argument list too long。
     cmd = [
         args.claude_bin, "-p",
-        "--agent", "translator",
+        "--agent", args.agent,
         "--model", args.model,
         "--output-format", "json",
         # 自动化场景无人审批；agent 工具白名单已限定可做的事
