@@ -116,12 +116,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- fix-placeholders ---
     p_fix = sub.add_parser(
-        "fix-placeholders", help="AI 修复翻译中的占位符错误并清理无效文件",
+        "fix-placeholders",
+        help="清理翻译结果：占位符不匹配的置空待重翻，源文件已删除的条目录移除",
     )
     p_fix.add_argument("--input", required=True, help="翻译 JSON 文件路径")
     p_fix.add_argument(
         "--source-root", default=".", help="Zed 源码根目录",
     )
+    # 保留 AI 参数以兼容既有调用（本流程已不需要模型，参数被忽略）
     _add_ai_args(p_fix)
 
     # --- mark-untranslatable ---

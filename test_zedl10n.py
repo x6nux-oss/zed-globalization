@@ -611,6 +611,57 @@ def test_full_mode_does_not_wipe_existing_translations() -> None:
     assert result["a.rs"]["Open"] == "打开", "没翻出的条目被清空了，好译文丢失"
 
 
+def test_fix_placeholders_clears_bad_keeps_good() -> None:
+    """占位符不匹配的条目置空（留待重翻），正常的原样保留"""
+    import json
+    td = Path(tempfile.mkdtemp())
+    src = td / "src"
+    (src / "crate" / "src").mkdir(parents=True)
+    (src / "crate" / "src" / "a.rs").write_text("fn main() {}", encoding="utf-8")
+
+    trans = td / "zh.json"
+    trans.write_text(json.dumps({
+        "crate/src/a.rs": {
+            "Open {}": "打开 {}",       # 占位符正确
+            "Save {}": "保存",          # 丢了占位符
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+
+    from zedl10n.fix_placeholders import fix_translation_json
+    cleared, removed = fix_translation_json(str(trans), str(src))
+
+    data = json.loads(trans.read_text(encoding="utf-8"))
+    assert cleared == 1, cleared
+    assert removed == 0, removed
+    assert data["crate/src/a.rs"]["Open {}"] == "打开 {}"
+    assert data["crate/src/a.rs"]["Save {}"] == "", "应为空值重翻，而非删除条目"
+    assert "Save {}" in data["crate/src/a.rs"], "条目被删除了，将来永远不会再翻"
+
+
+def test_fix_placeholders_removes_vanished_source_files() -> None:
+    """源文件已删除的条目整组移除"""
+    import json
+    td = Path(tempfile.mkdtemp())
+    src = td / "src"
+    (src / "crate").mkdir(parents=True)
+    (src / "crate" / "exists.rs").write_text("fn a() {}", encoding="utf-8")
+
+    trans = td / "zh.json"
+    trans.write_text(json.dumps({
+        "crate/exists.rs": {"Save": "保存"},
+        "crate/gone.rs": {"Open": "打开"},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    from zedl10n.fix_placeholders import fix_translation_json
+    cleared, removed = fix_translation_json(str(trans), str(src))
+
+    data = json.loads(trans.read_text(encoding="utf-8"))
+    assert removed == 1, removed
+    assert cleared == 0, cleared
+    assert "crate/exists.rs" in data
+    assert "crate/gone.rs" not in data, "源文件已消失的条目应被清理"
+
+
 def main() -> int:
     logging.disable(logging.WARNING)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

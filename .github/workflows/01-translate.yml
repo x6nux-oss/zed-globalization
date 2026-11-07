@@ -478,15 +478,14 @@ jobs:
             echo "complete=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 修复占位符错误并清理无效条目
+      - name: 清理无效条目
         if: steps.translate.outputs.complete == 'true'
         env:
-          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
-          AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          AI_MODEL: ${{ secrets.AI_MODEL }}
           VERSION: ${{ steps.params.outputs.VERSION }}
           TARGET_LANG: ${{ steps.params.outputs.TARGET_LANG }}
         run: |
+          # 占位符校验已在 translate 里做过（不合放置空待重翻）；
+          # 这里只做不需要模型的收尾：清掉源文件已删除的条目。
           zedl10n fix-placeholders \
             --input "i18n/${VERSION}/${TARGET_LANG}.json" \
             --source-root zed
