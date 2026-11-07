@@ -284,6 +284,85 @@ def collect_candidates(
     return out
 
 
+# ---------------------------------------------------------------------------
+# 用户可见性校验：Display 实现里的字符串一律可翻译
+# ---------------------------------------------------------------------------
+
+# `impl Display for X { ... }` 块内的字符串会经 write!/format! 输出，
+# 最终展示给用户。这类字符串被误判为「无需翻译」会让界面出现英文。
+# 实测 v1.28 曾把 ToolCallStatus 的 In Progress / Completed / Failed、
+# LoadError 的 Failed to install: {msg} 等 44 条误判进禁翻清单。
+#
+# 只匹配 Display：`impl Error for X {}` 常是空块，若不排除，它会先被
+# 当成一个 impl 块闭合，导致紧随其后的 Display 块没被覆盖。
+_DISPLAY_IMPL = re.compile(
+    r'impl(?:\s*<[^>]*>)?\s+(?:(?:std::)?fmt::)?Display\s+for\b',
+)
+
+
+def _display_line_ranges(content: str) -> list[tuple[int, int]]:
+    """返回所有 Display/Error impl 块的字符区间。
+
+    用花括号配对定位块尾，足以应付 Rust 正常缩进的代码；不追求
+    完备的语法分析——误判成「在 Display 里」只会让该条多翻一次，
+    代价远小于漏判导致的界面英文。
+    """
+    ranges: list[tuple[int, int]] = []
+    for m in _DISPLAY_IMPL.finditer(content):
+        start = m.start()
+        # 找到 impl 之后第一个 { 作为块起点
+        brace = content.find("{", m.end())
+        if brace == -1:
+            continue
+        depth = 0
+        for i in range(brace, len(content)):
+            ch = content[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    ranges.append((start, i + 1))
+                    break
+    return ranges
+
+
+def is_user_visible(
+    original: str, file_path: str, source_root: str,
+) -> bool:
+    """判断字符串是否出现在 Display/Error 实现里（即会展示给用户）。
+
+    找不到源码时返回 False（无法判断，维持调用方的原有判定）。
+    """
+    if not source_root or not file_path:
+        return False
+    root = Path(source_root)
+    rel = file_path[4:] if file_path.startswith("zed/") else file_path
+    p = root / rel
+    if not p.is_file():
+        return False
+    try:
+        content = p.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if "Display" not in content and "Error" not in content:
+        return False
+
+    needle = f'"{original}"'
+    ranges = _display_line_ranges(content)
+    if not ranges:
+        return False
+    pos = 0
+    while True:
+        idx = content.find(needle, pos)
+        if idx == -1:
+            break
+        if any(s <= idx < e for s, e in ranges):
+            return True
+        pos = idx + len(needle)
+    return False
+
+
 async def _judge_all(
     items: list[tuple[str, str]],
     ai_cfg: AIConfig,
@@ -335,6 +414,7 @@ def mark_untranslatable(
     ai_cfg: AIConfig | None = None,
     use_ai: bool = True,
     limit: int = 0,
+    source_root: str = "",
 ) -> dict[str, int]:
     """扫描翻译文件中的空值并扩充禁翻清单，返回统计。"""
     global _current_data, _current_dnt_path
@@ -354,6 +434,24 @@ def mark_untranslatable(
     log.info("待判定空值条目: %d", len(candidates))
     if not candidates:
         return {"candidates": 0, "by_rule": 0, "by_ai": 0, "added": 0}
+
+    # Display/Error 实现里的字符串会展示给用户，绝不能进禁翻清单。
+    # 在候选阶段就剔除：既省 AI 调用，也避免规则误判（rule_verdict 只看
+    # 字符串形态，看不出上下文）。
+    if source_root:
+        before = len(candidates)
+        candidates = [
+            (fp, s) for fp, s in candidates
+            if not is_user_visible(s, fp, source_root)
+        ]
+        excluded = before - len(candidates)
+        if excluded:
+            log.info("剔除 %d 条 Display 实现内的用户可见字符串", excluded)
+    else:
+        log.warning(
+            "未提供 --source-root，跳过用户可见性校验；"
+            "Display 内的文案可能被误判为禁翻",
+        )
 
     # 实时追加到 data["entries"]，确保信号处理器能保存增量进度
     added_count = 0
@@ -420,6 +518,7 @@ def run(args: argparse.Namespace) -> None:
         ai_cfg=ai_cfg,
         use_ai=not args.rules_only,
         limit=args.limit,
+        source_root=getattr(args, "source_root", ""),
     )
     log.info(
         "完成: 候选 %d, 规则 %d, AI %d, 新增 %d",

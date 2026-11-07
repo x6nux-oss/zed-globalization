@@ -144,6 +144,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, default=0,
         help="单次最多送 AI 判定的条目数，0 表示不限",
     )
+    p_mark.add_argument(
+        "--source-root", default="",
+        help="Zed 源码根目录。提供后会排除 Display/Error 实现内的"
+             "用户可见字符串，避免界面文案被误判为禁翻",
+    )
     _add_ai_args(p_mark)
 
     # --- convert ---

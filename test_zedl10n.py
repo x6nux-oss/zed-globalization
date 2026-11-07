@@ -728,6 +728,48 @@ def test_replace_judges_protection_on_original_content() -> None:
     assert '"已选中"' not in out, "受保护的标识符被错误翻译"
 
 
+def test_is_user_visible_detects_display_impl() -> None:
+    """Display 实现内的字符串会展示给用户，必须可翻译"""
+    import tempfile as _tf
+    from zedl10n.untranslatable import is_user_visible
+
+    td = Path(_tf.mkdtemp())
+    (td / "crate").mkdir()
+    (td / "crate" / "a.rs").write_text(
+        'impl fmt::Display for Status {\n'
+        '    fn fmt(&self, f: &mut Formatter) -> Result {\n'
+        '        write!(f, "In Progress")\n'
+        '    }\n'
+        '}\n'
+        '\n'
+        'fn unrelated() { let s = "some_identifier"; }\n',
+        encoding="utf-8",
+    )
+    assert is_user_visible("In Progress", "crate/a.rs", str(td)) is True
+    assert is_user_visible("some_identifier", "crate/a.rs", str(td)) is False
+    # 缺源码时不误报
+    assert is_user_visible("In Progress", "crate/a.rs", "") is False
+
+
+def test_is_user_visible_handles_empty_error_impl() -> None:
+    """`impl Error for X {}` 空块不得遮住紧随其后的 Display 块"""
+    import tempfile as _tf
+    from zedl10n.untranslatable import is_user_visible
+
+    td = Path(_tf.mkdtemp())
+    (td / "c.rs").write_text(
+        'impl Error for AuthRequired {}\n'
+        'impl fmt::Display for AuthRequired {\n'
+        '    fn fmt(&self, f: &mut Formatter) -> Result {\n'
+        '        write!(f, "Authentication required")\n'
+        '    }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    assert is_user_visible(
+        "Authentication required", "c.rs", str(td)) is True
+
+
 def main() -> int:
     logging.disable(logging.WARNING)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

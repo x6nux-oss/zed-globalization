@@ -36,6 +36,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  ZED_REPO: https://github.com/zed-industries/zed.git
+
 jobs:
   mark:
     runs-on: ubuntu-latest
@@ -57,6 +60,20 @@ jobs:
           mkdir -p config
           git checkout origin/i18n -- config/do_not_translate.json 2>/dev/null \
             || echo "禁翻清单尚不存在，将新建"
+
+      - name: 获取 Zed 源码（用于判断字符串是否用户可见）
+        run: |
+          # 判定需要看源码上下文：Display 实现里的字符串会展示给用户，
+          # 绝不能进禁翻清单。版本取当前翻译文件对应的上游版本。
+          ZED_VERSION=$(jq -r '.version // empty' scan_result.json 2>/dev/null || true)
+          if [ -z "$ZED_VERSION" ] || [ "$ZED_VERSION" = "null" ]; then
+            echo "::warning::未取到版本号，改为浅克隆默认分支"
+            git clone --depth 1 $ZED_REPO zed
+          else
+            echo "按版本 $ZED_VERSION 克隆"
+            git clone --depth 1 --branch "$ZED_VERSION" $ZED_REPO zed \
+              || git clone --depth 1 $ZED_REPO zed
+          fi
 
       - name: 选择最新版本的翻译文件
         id: pick
@@ -83,6 +100,13 @@ jobs:
           echo "使用翻译文件: $TRANS"
           echo "trans_file=$TRANS" >> $GITHUB_OUTPUT
 
+      - name: 剔除历史误判（Display 内的用户可见字符串）
+        run: |
+          # 清单里可能残留早期误判——Display 实现里的字符串会展示给用户，
+          # 留在清单里会让界面永远显示英文。每轮先清理一遍。
+          python3 scripts/clean_dnt_display.py \
+            config/do_not_translate.json --source-root zed
+
       - name: 判定并更新禁翻清单（增量模式 + 超时保护）
         env:
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
@@ -94,6 +118,7 @@ jobs:
         run: |
           ARGS=(--input "${{ steps.pick.outputs.trans_file }}"
                 --do-not-translate config/do_not_translate.json
+                --source-root zed
                 --limit "${LIMIT:-0}")
           [ "$RULES_ONLY" = "true" ] && ARGS+=(--rules-only)
 
