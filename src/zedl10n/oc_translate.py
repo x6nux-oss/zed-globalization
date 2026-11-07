@@ -51,6 +51,9 @@ class SessionResult:
     untranslatable: list[dict] = field(default_factory=list)
     ok: bool = False
     detail: str = ""
+    # 判定会话专用：agent 是否明确报告了结论（哪怕一条都不标记）。
+    # 用于区分「整批都该翻译」与「会话异常没跑完」。
+    judged: bool = False
 
 
 def load_glossary_inline(glossary_path: str) -> str:
@@ -192,7 +195,7 @@ def collect_jsonl(path: str) -> dict[str, str]:
 
 
 def collect_untranslatable(path: str) -> list[dict]:
-    """读禁翻标记 JSONL"""
+    """读禁翻标记 JSONL，跳过判定结论记录行"""
     records: list[dict] = []
     p = Path(path)
     if not p.exists():
@@ -205,9 +208,29 @@ def collect_untranslatable(path: str) -> list[dict]:
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if rec.get("_judgement"):
+            continue  # 结论行，不是条目
         if isinstance(rec.get("original"), str) and rec["original"]:
             records.append(rec)
     return records
+
+
+def has_judgement(path: str) -> bool:
+    """判定会话是否明确报告了结论（含「一条都不用标记」的情况）"""
+    p = Path(path)
+    if not p.exists():
+        return False
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("_judgement"):
+            return True
+    return False
 
 
 async def run_session(args: SessionArgs) -> SessionResult:
@@ -284,15 +307,20 @@ async def run_session(args: SessionArgs) -> SessionResult:
 
     translations = collect_jsonl(str(out_path))
     untranslatable = collect_untranslatable(str(dnt_path))
+    judged = has_judgement(str(dnt_path))
 
     if proc.returncode != 0:
         tail = (stderr or b"").decode("utf-8", "replace")[-500:]
         return SessionResult(
             args.batch_id, translations, untranslatable, ok=False,
-            detail=f"退出码 {proc.returncode}: {tail}",
+            detail=f"退出码 {proc.returncode}: {tail}", judged=judged,
         )
-    if not translations and not untranslatable:
+    # 判定会话可能「一条都不标记」——整批都该翻译是合法结论。
+    # 这种情况靠 report_judgement 的结论行区分，不能当成失败。
+    if not translations and not untranslatable and not judged:
         return SessionResult(
             args.batch_id, ok=False, detail="会话未产出任何结果",
         )
-    return SessionResult(args.batch_id, translations, untranslatable, ok=True)
+    return SessionResult(
+        args.batch_id, translations, untranslatable, ok=True, judged=judged,
+    )

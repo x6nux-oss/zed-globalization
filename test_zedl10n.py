@@ -405,7 +405,7 @@ def test_mcp_server_exposes_three_tools() -> None:
     names = {t.name for t in tools}
     assert names == {
         "glossary_lookup", "submit_translation", "submit_translations",
-        "mark_untranslatable", "mark_untranslatables",
+        "mark_untranslatable", "mark_untranslatables", "report_judgement",
     }, names
 
 
@@ -867,6 +867,40 @@ def test_recheck_removes_entries_ai_wants_translated() -> None:
     assert removed == 1, removed
     originals = [e["original"] for e in data["entries"]]
     assert originals == ["tool_name"], originals
+
+
+def test_report_judgement_marks_session_success_without_entries() -> None:
+    """整批都该翻译时 agent 不标记任何条目，但 must 报告结论——
+    这种会话必须算成功，否则复查会误判为失败并保留误判条目
+    """
+    import tempfile as _tf
+    from zedl10n.mcp_server import record_judgement, record_translations
+    from zedl10n.oc_translate import collect_untranslatable, has_judgement
+
+    dnt = Path(_tf.mkdtemp())
+    assert has_judgement(str(dnt / "b.jsonl")) is False
+
+    record_judgement(str(dnt), "b", total=2, judged_untranslatable=0)
+    assert has_judgement(str(dnt / "b.jsonl")) is True
+    # 结论行不能被当成条目
+    assert collect_untranslatable(str(dnt / "b.jsonl")) == []
+
+
+def test_judgement_line_ignored_in_entries() -> None:
+    """结论行与真实条目混在一起时，只取真实条目"""
+    import tempfile as _tf
+    from zedl10n.mcp_server import record_judgement, record_untranslatables
+    from zedl10n.oc_translate import collect_untranslatable
+
+    dnt = Path(_tf.mkdtemp())
+    record_untranslatables(str(dnt), "b", [
+        {"original": "tool_name", "reason": "api_identifier"},
+    ])
+    record_judgement(str(dnt), "b", total=2, judged_untranslatable=1)
+
+    got = collect_untranslatable(str(dnt / "b.jsonl"))
+    assert len(got) == 1, got
+    assert got[0]["original"] == "tool_name"
 
 
 def main() -> int:

@@ -187,8 +187,12 @@ def build_judge_prompt(
         f"它们来自 {file_path}。\n"
         f"{source_block}\n"
         f"## 工作方式（重要）\n"
-        f"每次 tool 调用都是一轮模型往返。通读整批后，调 **一次** "
-        f"`mark_untranslatables`，把判定为无需翻译的条目一次性传入。\n"
+        f"每次 tool 调用都是一轮模型往返。步骤如下：\n"
+        f"1. 通读整批，判断每条是否需要翻译。\n"
+        f"2. 调 **一次** `mark_untranslatables`，把判定为无需翻译的条目传入。\n"
+        f"   若一条都不需要翻译，跳过这步。\n"
+        f"3. **必须**再调一次 `report_judgement` 报告结论——"
+        f"即使一条都没标记也要调，否则系统无法判断是判定完成还是会话中断。\n"
         f"需要翻译的条目**不要提交**。拿不准的也不要提交。\n\n"
         f"## 待判定条目（共 {len(strings)} 条）\n{entries}\n"
     )
@@ -493,13 +497,21 @@ async def _recheck_entries(
         async with semaphore:
             res = await run_session(args)
         if not res.ok:
-            # 失败批次不动：保守，避免整批文案被误放出
+            # 失败批次不动：保守，避免整批文案被误放出。
+            # 注意：agent 通过 report_judgement 明确报告过结论的批次，
+            # 即使一条都没标记也会走 ok=True 分支（整批都该翻译是合法结论）。
             log.warning("复查批次 %s 失败，保留原判定: %s", batch_id, res.detail)
             failed.add(idx)
             return
-        confirmed[idx] = {
+        keep = {
             r["original"] for r in res.untranslatable if r.get("original")
         }
+        if not keep:
+            log.info(
+                "复查批次 %s：整批 %d 条都该翻译，全部剔除",
+                batch_id, len(strings),
+            )
+        confirmed[idx] = keep
 
     tasks = [
         asyncio.create_task(one(i, fp, ss))

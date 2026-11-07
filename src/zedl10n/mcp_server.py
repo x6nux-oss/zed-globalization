@@ -116,6 +116,23 @@ def record_untranslatables(
     return len(valid)
 
 
+def record_judgement(
+    dnt_dir: str, batch_id: str, total: int, judged_untranslatable: int,
+) -> str:
+    """记录一次判定结论，作为「会话确实跑完」的信号。
+
+    为什么需要：classifier 只提交「认为无需翻译」的条目。若整批都该翻译，
+    它会一个都不提交——与「会话根本没跑成功」无法区分。复查流程必须能
+    分辨这两种情况：前者应剔除整批，后者应保留原判定。
+    """
+    _append_jsonl(dnt_dir, batch_id, {
+        "_judgement": True,
+        "total": total,
+        "untranslatable": judged_untranslatable,
+    })
+    return f"已记录判定：共 {total} 条，其中 {judged_untranslatable} 条无需翻译"
+
+
 def lookup_term(glossary_path: str, term: str) -> str:
     """查术语表。文件缺失或结构异常时返回未收录，不抛异常。
 
@@ -203,6 +220,18 @@ def build_server() -> MCPServer:
     def mark_untranslatable(original: str, reason: str) -> str:
         """标记一条无需翻译的条目"""
         return record_untranslatable(dnt_dir, batch_id, original, reason)
+
+    @server.tool(
+        description=(
+            "**必须调用且只调用一次**：报告本批判定结论。"
+            "即使一条都不需要标记（整批都该翻译），也必须调用本工具，"
+            "否则无法区分「判定完成」与「会话异常」。"
+            "untranslatable_count 填你实际判定为无需翻译的条数。"
+        ),
+    )
+    def report_judgement(total: int, untranslatable_count: int) -> str:
+        """报告判定结论，作为会话完成的信号"""
+        return record_judgement(dnt_dir, batch_id, total, untranslatable_count)
 
     return server
 
