@@ -569,9 +569,45 @@ def apply_category_6(zed_dir: Path, *, dry_run: bool = False) -> None:
 # Category 7: Auto-update redirect to ZedG GitHub releases
 # ---------------------------------------------------------------------------
 
+def patch_auto_update_manifest(zed_dir: Path, *, dry_run: bool = False) -> None:
+    """给 auto_update 补上 github_releases 依赖（v1.28+ 才需要）。
+
+    上游把 latest_github_release 挪进独立 crate 后，auto_update 的
+    Cargo.toml 并没有该依赖——它原本是从 http_client 拿的。不补这一行，
+    `use github_releases::latest_github_release;` 会报 unresolved crate。
+    """
+    manifest = zed_dir / "crates" / "auto_update" / "Cargo.toml"
+    content = read_file(manifest)
+    if content is None:
+        return
+
+    # 老版本没有这个 crate，不需要改
+    if not (
+        zed_dir / "crates" / "github_releases" / "src" / "github_releases.rs"
+    ).is_file():
+        return
+
+    if "github_releases" in content:
+        log.info("  [already patched] %s (github_releases dep)", manifest)
+        return
+
+    # 插在 [dependencies] 段内，按字母序落在 gpui 之后
+    pat = r"(?m)^(gpui\.workspace\s*=\s*true)$"
+    new_content = re.sub(pat, r"\1\ngithub_releases.workspace = true", content, count=1)
+    if new_content == content:
+        log.warning("  Pattern not matched for github_releases dep in %s", manifest)
+        return
+
+    write_file(manifest, new_content, dry_run=dry_run)
+    action = "would modify" if dry_run else "modified"
+    log.info("  [%s] %s (github_releases dep)", action, manifest)
+
+
 def apply_category_7(zed_dir: Path, *, dry_run: bool = False) -> None:
     """Category 7: Auto-update redirect to GitHub releases."""
     log.info("Category 7: Auto-update redirect to GitHub releases")
+
+    patch_auto_update_manifest(zed_dir, dry_run=dry_run)
 
     auto_update = zed_dir / "crates" / "auto_update" / "src" / "auto_update.rs"
     content = read_file(auto_update)
@@ -580,16 +616,33 @@ def apply_category_7(zed_dir: Path, *, dry_run: bool = False) -> None:
 
     original = content
 
-    # 7a. Add import for github module (idempotent check)
+    # 7a. Add import for latest_github_release (idempotent check)
+    #
+    # 上游在 v1.28 把 latest_github_release 从 http_client 挪到了独立 crate
+    # github_releases。函数签名完全一致，只有模块路径变了。这里按实际源码
+    # 结构探测，避免写死路径后随上游迁移而编译失败（v1.28.0-pre 即因此报
+    # `could not find github in http_client`）。
     if "latest_github_release" not in content:
+        uses_new_crate = (
+            zed_dir / "crates" / "github_releases" / "src" / "github_releases.rs"
+        ).is_file()
+        use_stmt = (
+            "use github_releases::latest_github_release;"
+            if uses_new_crate
+            else "use http_client::github::latest_github_release;"
+        )
         pat = r'(use\s+http_client::\{[^}]*HttpClientWithUrl[^}]*\};)'
-        repl = r'\1\nuse http_client::github::latest_github_release;'
+        repl = r"\1\n" + use_stmt
         new_content = re.sub(pat, repl, content, count=1)
         if new_content == content:
             log.warning("  Pattern not matched for github import in %s", auto_update)
         else:
             content = new_content
-            log.info("  [patched] %s (add github import)", auto_update)
+            log.info(
+                "  [patched] %s (add github import: %s)",
+                auto_update,
+                "github_releases" if uses_new_crate else "http_client::github",
+            )
     else:
         log.info("  [already patched] %s (github import)", auto_update)
 

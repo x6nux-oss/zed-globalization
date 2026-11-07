@@ -272,7 +272,18 @@ jobs:
           RUSTC_WRAPPER: ""
         run: |
           cd zed
-          cargo check 2>&1 | tail -5
+          # 用 PIPESTATUS 取 cargo 的真实退出码：管道只返回最后一个命令
+          # （tail）的状态，直接 `cargo check | tail` 会让失败静默通过，
+          # 补丁带着编译错误一路流到发布。
+          set +e
+          cargo check 2>&1 | tail -30
+          CODE=${PIPESTATUS[0]}
+          set -e
+          if [ "$CODE" -ne 0 ]; then
+            echo "::error::cargo check 失败（退出码 $CODE），本地化补丁存在编译错误"
+            exit "$CODE"
+          fi
+          echo "cargo check 通过"
 
       - name: 生成本地化补丁
         run: |
