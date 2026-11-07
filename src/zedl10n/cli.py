@@ -149,6 +149,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Zed 源码根目录。提供后会排除 Display/Error 实现内的"
              "用户可见字符串，避免界面文案被误判为禁翻",
     )
+    p_mark.add_argument(
+        "--recheck-existing", action="store_true",
+        help="复查清单里已有的条目：全部重新送 AI 判定，"
+             "认为该翻译的从清单剔除（纠正历史误判）",
+    )
     _add_ai_args(p_mark)
 
     # --- convert ---

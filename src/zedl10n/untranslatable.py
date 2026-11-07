@@ -425,6 +425,121 @@ async def _judge_all(
     return judged_count
 
 
+async def _recheck_entries(
+    data: dict,
+    dnt_path: str,
+    ai_cfg: AIConfig | None,
+    source_root: str,
+    limit: int = 0,
+) -> int:
+    """复查清单里已有的条目，剔除 AI 认为该翻译的。返回剔除条数。
+
+    与新增判定走同一套会话机制，区别是「提交」的语义反过来：
+    classifier 只提交它认为无需翻译的条目，所以**没被提交的**就是
+    该翻译的，从清单里剔除。
+
+    保守起见，整批失败（会话超时/异常）时不动该批任何条目——
+    宁可留着旧判定，也不能因为一次失败就把整片文案放出来重翻。
+    """
+    entries = data.get("entries", [])
+    if not entries:
+        log.info("复查：清单为空，跳过")
+        return 0
+    if not ai_cfg:
+        log.warning("复查需要 AI 判定，但未提供 AI 配置，跳过")
+        return 0
+
+    items = [(e["file"], e["original"]) for e in entries]
+    if limit > 0:
+        log.info("复查：按 --limit 只处理前 %d 条", limit)
+        items = items[:limit]
+
+    # 逐条复查：把清单条目当作候选重新送判定
+    from .oc_translate import (
+        SessionArgs, load_source_snippet, run_session, write_mcp_config,
+    )
+
+    run_dir = Path("i18n/.recheck")
+    out_dir = run_dir / "out"
+    dnt_dir = run_dir / "dnt"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dnt_dir.mkdir(parents=True, exist_ok=True)
+    mcp_config = str(run_dir / "mcp.json")
+    write_mcp_config(
+        mcp_config, str(Path(__file__).resolve().parent / "mcp_server.py"),
+    )
+
+    semaphore = asyncio.Semaphore(ai_cfg.concurrency)
+    batches = _build_batches(items)
+    log.info("复查：%d 条，拆分为 %d 批", len(items), len(batches))
+
+    # 每批的判定结果：batch_id -> 被判定为「无需翻译」的原文集合
+    confirmed: dict[int, set[str]] = {}
+    failed: set[int] = set()
+
+    async def one(idx: int, fp: str, strings: list[str]) -> None:
+        if _shutdown_requested:
+            return
+        batch_id = f"r{idx:04d}"
+        prompt = build_judge_prompt(
+            fp, strings, load_source_snippet(source_root, fp),
+        )
+        args = SessionArgs(
+            batch_id=batch_id, prompt=prompt, model=ai_cfg.model,
+            out_dir=str(out_dir), dnt_dir=str(dnt_dir),
+            glossary_path="", mcp_config_path=mcp_config,
+            agent="classifier",
+        )
+        async with semaphore:
+            res = await run_session(args)
+        if not res.ok:
+            # 失败批次不动：保守，避免整批文案被误放出
+            log.warning("复查批次 %s 失败，保留原判定: %s", batch_id, res.detail)
+            failed.add(idx)
+            return
+        confirmed[idx] = {
+            r["original"] for r in res.untranslatable if r.get("original")
+        }
+
+    tasks = [
+        asyncio.create_task(one(i, fp, ss))
+        for i, (fp, ss) in enumerate(batches)
+    ]
+    pbar = ProgressBar(len(tasks), desc="复查")
+    for coro in asyncio.as_completed(tasks):
+        await coro
+        pbar.update()
+    pbar.finish()
+
+    # 重新构造清单：只保留仍被判定为无需翻译的条目。
+    # 先建「该保留的 (file, original) 集合」再一遍过滤，避免 O(n²)。
+    keep_pairs: set[tuple[str, str]] = set()
+    for idx, (fp, ss) in enumerate(batches):
+        if idx in failed or idx not in confirmed:
+            # 失败/未完成的批次原样保留
+            keep_pairs.update((fp, s) for s in ss)
+        else:
+            keep_pairs.update((fp, s) for s in confirmed[idx])
+
+    covered_pairs = {(fp, s) for fp, ss in batches for s in ss}
+    kept: list[dict] = []
+    removed = 0
+    for e in entries:
+        pair = (e["file"], e["original"])
+        if pair in covered_pairs and pair not in keep_pairs:
+            removed += 1
+            continue
+        kept.append(e)
+
+    data["entries"] = kept
+    save_json(data, dnt_path)
+    log.info(
+        "复查完成：%d 条 → %d 条，剔除 %d 条（失败批次 %d 个已保留原判定）",
+        len(entries), len(kept), removed, len(failed),
+    )
+    return removed
+
+
 def mark_untranslatable(
     trans_path: str,
     dnt_path: str,
@@ -432,6 +547,7 @@ def mark_untranslatable(
     use_ai: bool = True,
     limit: int = 0,
     source_root: str = "",
+    recheck_existing: bool = False,
 ) -> dict[str, int]:
     """扫描翻译文件中的空值并扩充禁翻清单，返回统计。"""
     global _current_data, _current_dnt_path
@@ -446,6 +562,20 @@ def mark_untranslatable(
     # 设置全局变量，以便信号处理器可以保存进度
     _current_data = data
     _current_dnt_path = dnt_path
+
+    # 复查已有规则：把清单里已有的条目重新送判定，AI 认为该翻译的剔除。
+    # 这是唯一能纠正历史误判的途径——collect_candidates 只看「不在清单里」
+    # 的条目，已在清单中的永远得不到第二次审视。
+    rechecked_removed = 0
+    if recheck_existing:
+        if not use_ai:
+            log.warning("--recheck-existing 需要 AI 判定，与 --rules-only 冲突，跳过复查")
+        else:
+            rechecked_removed = asyncio.run(
+                _recheck_entries(data, dnt_path, ai_cfg, source_root, limit),
+            )
+            covered = {(e["file"], e["original"]) for e in data["entries"]}
+            covered_global = {e["original"] for e in data["global_entries"]}
 
     candidates = collect_candidates(translations, covered, covered_global)
     log.info("待判定空值条目: %d", len(candidates))
@@ -538,6 +668,7 @@ def run(args: argparse.Namespace) -> None:
         use_ai=not args.rules_only,
         limit=args.limit,
         source_root=getattr(args, "source_root", ""),
+        recheck_existing=getattr(args, "recheck_existing", False),
     )
     log.info(
         "完成: 候选 %d, 规则 %d, AI %d, 新增 %d",

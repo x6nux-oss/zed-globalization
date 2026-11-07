@@ -28,6 +28,10 @@ on:
         type: string
         required: false
         default: "0"
+      recheck_existing:
+        description: "复查已有规则（把清单里已有条目全部重新判定，剔除误判）"
+        type: boolean
+        default: false
 
 concurrency:
   group: mark-untranslatable
@@ -129,6 +133,7 @@ jobs:
           AI_CONCURRENCY: ${{ vars.AI_CONCURRENCY || '100' }}
           RULES_ONLY: ${{ inputs.rules_only }}
           LIMIT: ${{ inputs.limit }}
+          RECHECK_EXISTING: ${{ inputs.recheck_existing }}
           # ── Claude Code 接入（与 01 一致，九个变量强制覆盖全部模型槽位）──
           ANTHROPIC_BASE_URL: ${{ secrets.AI_BASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -150,6 +155,7 @@ jobs:
                 --source-root zed
                 --limit "${LIMIT:-0}")
           [ "$RULES_ONLY" = "true" ] && ARGS+=(--rules-only)
+          [ "$RECHECK_EXISTING" = "true" ] && ARGS+=(--recheck-existing)
 
           # 设置超时时间为 5 小时（18000 秒）
           TIMEOUT=18000

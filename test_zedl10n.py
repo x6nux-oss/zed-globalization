@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 import logging
 import tempfile
 import sys
@@ -786,6 +787,86 @@ def test_judge_prompt_includes_source_context() -> None:
 
     prompt = build_judge_prompt("a.rs", ["x"], "fn main() {}")
     assert "fn main() {}" in prompt
+
+
+def test_recheck_keeps_failed_batches_intact() -> None:
+    """复查时整批失败不能剔除任何条目——宁可留旧判定，不可误放文案"""
+    import asyncio
+    import tempfile as _tf
+    from zedl10n import untranslatable as un
+    from zedl10n.oc_translate import SessionResult
+    from zedl10n.utils import AIConfig
+
+    td = Path(_tf.mkdtemp())
+    dnt = td / "dnt.json"
+    data = {
+        "global_entries": [],
+        "entries": [
+            {"file": "a.rs", "original": "tool_name", "reason": "api_identifier"},
+            {"file": "a.rs", "original": "Save", "reason": "serialization"},
+        ],
+    }
+    dnt.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    async def failing(args):
+        return SessionResult(args.batch_id, ok=False, detail="模拟失败")
+
+    import zedl10n.oc_translate as oc
+    orig_run = oc.run_session
+    oc.run_session = failing
+    try:
+        removed = asyncio.run(un._recheck_entries(
+            data, str(dnt), AIConfig(base_url="", api_key="k", model="m"),
+            source_root="", limit=0,
+        ))
+    finally:
+        oc.run_session = orig_run
+
+    assert removed == 0, "失败批次被误剔除"
+    assert len(data["entries"]) == 2, data["entries"]
+
+
+def test_recheck_removes_entries_ai_wants_translated() -> None:
+    """复查：AI 没提交（即认为该翻译）的条目要从清单剔除"""
+    import asyncio
+    import tempfile as _tf
+    from zedl10n import untranslatable as un
+    from zedl10n.oc_translate import SessionResult
+    from zedl10n.utils import AIConfig
+
+    td = Path(_tf.mkdtemp())
+    dnt = td / "dnt.json"
+    data = {
+        "global_entries": [],
+        "entries": [
+            {"file": "a.rs", "original": "tool_name", "reason": "api_identifier"},
+            {"file": "a.rs", "original": "In Progress", "reason": "serialization"},
+        ],
+    }
+    dnt.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    async def only_identifier(args):
+        # 只确认 tool_name，In Progress 未提交 → 应被剔除
+        return SessionResult(
+            args.batch_id,
+            untranslatable=[{"original": "tool_name", "reason": "api_identifier"}],
+            ok=True,
+        )
+
+    import zedl10n.oc_translate as oc
+    orig_run = oc.run_session
+    oc.run_session = only_identifier
+    try:
+        removed = asyncio.run(un._recheck_entries(
+            data, str(dnt), AIConfig(base_url="", api_key="k", model="m"),
+            source_root="", limit=0,
+        ))
+    finally:
+        oc.run_session = orig_run
+
+    assert removed == 1, removed
+    originals = [e["original"] for e in data["entries"]]
+    assert originals == ["tool_name"], originals
 
 
 def main() -> int:
