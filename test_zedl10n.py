@@ -662,6 +662,41 @@ def test_fix_placeholders_removes_vanished_source_files() -> None:
     assert "crate/gone.rs" not in data, "源文件已消失的条目应被清理"
 
 
+def test_run_session_passes_prompt_via_stdin() -> None:
+    """提示词必须走 stdin：Linux 单参数上限 128KB，走命令行会 E2BIG
+
+    实测批次提示词可达 96KB 以上（多文件源码上下文 + 数百条字符串），
+    作为命令行参数报 [Errno 7] Argument list too long。
+    """
+    import tempfile as _tf
+    from zedl10n.oc_translate import SessionArgs, run_session
+
+    td = Path(_tf.mkdtemp())
+    # 构造一个明显超过 128KB 的提示词
+    huge_prompt = "翻译以下内容\n" + ("x" * 200_000)
+
+    import shutil
+    true_bin = shutil.which("true") or "/usr/bin/true"
+    args = SessionArgs(
+        batch_id="big",
+        prompt=huge_prompt,
+        model="m",
+        out_dir=str(td / "out"),
+        dnt_dir=str(td / "dnt"),
+        glossary_path="",
+        mcp_config_path=str(td / "mcp.json"),
+        # 用一个假的可执行文件，只验证参数长度不会触发 E2BIG
+        claude_bin=true_bin,
+        timeout=10,
+    )
+    import asyncio
+    res = asyncio.run(run_session(args))
+
+    # /bin/true 不产出任何条目，故 ok=False；关键是没有因参数过长而启动失败
+    assert "Argument list too long" not in res.detail, res.detail
+    assert "启动失败" not in res.detail, res.detail
+
+
 def main() -> int:
     logging.disable(logging.WARNING)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

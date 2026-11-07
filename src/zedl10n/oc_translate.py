@@ -220,8 +220,11 @@ async def run_session(args: SessionArgs) -> SessionResult:
     for p in (out_path, dnt_path):
         p.unlink(missing_ok=True)
 
+    # 提示词走 stdin，不走命令行参数：Linux 单参数上限 128KB
+    # （MAX_ARG_STRLEN），一批多文件的源码上下文 + 字符串条目很容易超过，
+    # 实测报 [Errno 7] Argument list too long。
     cmd = [
-        args.claude_bin, "-p", args.prompt,
+        args.claude_bin, "-p",
         "--agent", "translator",
         "--model", args.model,
         "--output-format", "json",
@@ -244,7 +247,7 @@ async def run_session(args: SessionArgs) -> SessionResult:
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, env=env,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -253,7 +256,7 @@ async def run_session(args: SessionArgs) -> SessionResult:
 
     try:
         _, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=args.timeout,
+            proc.communicate(args.prompt.encode("utf-8")), timeout=args.timeout,
         )
     except TimeoutError:
         proc.kill()
