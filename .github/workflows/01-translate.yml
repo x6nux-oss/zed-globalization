@@ -189,7 +189,7 @@ jobs:
           python-version: "3.12"
 
       - name: 安装依赖
-        run: pip install ".[l10n]"
+        run: pip install ".[all]"
 
       - name: 安装 Claude Code（版本固定，升级前需重跑冒烟脚本）
         run: npm install -g @anthropic-ai/claude-code@2.1.280

@@ -194,7 +194,7 @@ jobs:
         run: python3 scripts/rebrand.py --zed-dir zed
 
       - name: 安装 Python 与工具
-        run: pip install .
+        run: pip install ".[all]"
 
       - name: 校验保护规则与响应解析
         run: python3 test_zedl10n.py
@@ -2634,7 +2634,7 @@ jobs:
           AI_MODEL: ${{ secrets.AI_MODEL }}
           TRANS_FILE: ${{ steps.release_trans.outputs.trans_file }}
         run: |
-          pip install ".[ai]" -q
+          pip install ".[all]" -q
           TRANS_ARG=""
           [ -n "$TRANS_FILE" ] && TRANS_ARG="--translation-file $TRANS_FILE"
           zedl10n release-notes \

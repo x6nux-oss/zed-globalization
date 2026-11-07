@@ -48,7 +48,7 @@ jobs:
           python-version: "3.12"
 
       - name: 安装依赖
-        run: pip install ".[ai]"
+        run: pip install ".[all]"
 
       - name: 从 i18n 分支获取翻译结果与禁翻清单
         run: |
