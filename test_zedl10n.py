@@ -697,6 +697,37 @@ def test_run_session_passes_prompt_via_stdin() -> None:
     assert "启动失败" not in res.detail, res.detail
 
 
+def test_replace_judges_protection_on_original_content() -> None:
+    """受保护判定必须基于原始内容，不能受先前替换造成的偏移影响
+
+    旧实现每替换一条就重扫受保护区，位置随之前替换而漂移，导致部分
+    本该保护的字符串（如 menu.action("Selected")）被错误翻译。
+    """
+    from zedl10n.replace import (
+        _apply_all_replacements, _filter_replacements,
+    )
+
+    # 前面有两条可翻译条目（长度变化会推动后续位置），
+    # 后面是一条落在 key_context 保护区里的标识符
+    src = (
+        'let a = "First Button";\n'
+        'let b = "Second Button";\n'
+        'key_context.add("Selected");\n'
+    )
+    reps = _filter_replacements(
+        {"First Button": "第一个按钮", "Second Button": "第二个按钮",
+         "Selected": "已选中"},
+        "x.rs",
+    )
+    out, _ = _apply_all_replacements(src, reps)
+
+    assert '"第一个按钮"' in out, out
+    assert '"第二个按钮"' in out, out
+    # key_context.add(...) 属于受保护模式，不得被翻译
+    assert 'key_context.add("Selected")' in out, out
+    assert '"已选中"' not in out, "受保护的标识符被错误翻译"
+
+
 def main() -> int:
     logging.disable(logging.WARNING)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
