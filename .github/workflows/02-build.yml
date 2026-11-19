@@ -715,7 +715,10 @@ jobs:
         run: |
           rustup update stable
           rustup default stable
-          rustup target add aarch64-pc-windows-msvc
+          # runner 本身是 ARM64，默认 toolchain 即 stable-aarch64-pc-windows-msvc，
+          # 直接原生编译。不要加 --target：多出的 target 子目录会让每条
+          # -L dependency= 路径长 23 字符，cli crate 的 rustc 命令行会突破
+          # Windows 32767 上限（sccache 报 os error 206）。
 
       - name: 安装 sccache
         shell: pwsh
@@ -855,12 +858,12 @@ jobs:
               }
           }
 
-          python3 "$env:GITHUB_WORKSPACE\script\ci-build.py" --source-dir C:\z --target aarch64-pc-windows-msvc --jobs 4 --retries 3
+          python3 "$env:GITHUB_WORKSPACE\script\ci-build.py" --source-dir C:\z --jobs 4 --retries 3
           $buildExit = $LASTEXITCODE
 
           if ($buildExit -eq 0) {
             Write-Host "=== 编译 CLI 辅助二进制 ==="
-            cargo build --release --package cli --locked --target aarch64-pc-windows-msvc --manifest-path C:\z\Cargo.toml
+            cargo build --release --package cli --locked --manifest-path C:\z\Cargo.toml
           }
 
           Stop-Job $monitorJob; Remove-Job $monitorJob
@@ -914,10 +917,11 @@ jobs:
         shell: bash
         run: |
           CACHE_KEY="sccache-windows-aarch64"
+          # CARGO_HOME/SCCACHE_DIR 都在 C:\cc（x64 job 才是 D:\c）
           tar -czf "${CACHE_KEY}.tar.gz" \
             --ignore-failed-read \
-            -C /d \
-            c/sccache c/registry c/git 2>/dev/null || true
+            -C /c \
+            cc/sccache cc/registry cc/git 2>/dev/null || true
           echo "缓存归档大小: $(du -sh ${CACHE_KEY}.tar.gz | cut -f1)"
 
       - name: 上传 sccache 缓存 Artifact
@@ -974,8 +978,8 @@ jobs:
         run: |
           mkdir zed-dist
           mkdir zed-dist\bin
-          Copy-Item "C:\z\target\aarch64-pc-windows-msvc\release\zed.exe" zed-dist\ZedG.exe
-          Copy-Item "C:\z\target\aarch64-pc-windows-msvc\release\cli.exe" zed-dist\bin\ZedG.exe
+          Copy-Item "C:\z\target\release\zed.exe" zed-dist\ZedG.exe
+          Copy-Item "C:\z\target\release\cli.exe" zed-dist\bin\ZedG.exe
           Compress-Archive -Path zed-dist\* -DestinationPath "zedg-$env:LANG_LOWER-windows-aarch64-$env:BUILD_VERSION.zip"
 
       - name: 安装 NSIS
