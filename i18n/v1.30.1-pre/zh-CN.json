@@ -1777,7 +1777,7 @@
         "Task": "任务",
         "doc": "文档",
         "# Design\\n- step": "",
-        "markdown plan": "",
+        "markdown plan": "Markdown 计划",
         "markdown plan is visible": "markdown 方案可见",
         "identical markdown keeps dismissal": "相同的 markdown 保持关闭状态",
         "# Design\\n- step\\n- another": "",
@@ -1801,15 +1801,15 @@
         "Session {}": "会话 {}",
         "Ignoring relative plan file path {path:?}": "忽略相对的计划文件路径 {path:?}",
         "/tmp/plan.md": "",
-        "naming the plan's file is a change": "",
-        "the content is still shown": "",
+        "naming the plan's file is a change": "为计划命名文件也算作变更",
+        "the content is still shown": "内容仍会显示",
         "plan.md": "",
-        "a relative path means the plan has no file": "",
+        "a relative path means the plan has no file": "相对路径表示该计划没有对应文件",
         "from-v1": "",
-        "prepare v1 content": "",
+        "prepare v1 content": "准备 v1 内容",
         "from-v2": "",
         "expected two session references, got {content:?}": "预期两个会话引用,实际得到 {content:?}",
-        "external tool-call location": ""
+        "external tool-call location": "外部工具调用位置"
     },
     "zed/crates/acp_thread/src/mention.rs": {
         "default_include_errors": "",
@@ -3207,7 +3207,7 @@
         "expected authorization title": "",
         "agent skills": "智能体技能",
         "Authorization title should mention agent skills, got: {title}": "",
-        "agent skills prompt must not offer an \\\"Always allow\\\" option: {:?}": "",
+        "agent skills prompt must not offer an \\\"Always allow\\\" option: {:?}": "智能体技能提示不得提供“始终允许”选项:{:?}",
         "authorization response should send": "",
         "should delete after approval: {result:?}": "",
         "references": "",
@@ -3660,8 +3660,8 @@
         "root/secrets/key.pem": "",
         "root/src/../secrets/key.pem": "",
         "Edit `{path}`": "编辑 `{path}`",
-        "default: {default:?}": "",
-        "a path that matches no pattern should not prompt (default: {default:?})": ""
+        "default: {default:?}": "默认:{default:?}",
+        "a path that matches no pattern should not prompt (default: {default:?})": "不匹配任何模式的路径不应弹出提示(默认:{default:?})"
     },
     "zed/crates/agent/src/tools/read_file_tool.rs": {
         "read_file": "",
@@ -3905,7 +3905,7 @@
         "abc": "",
         "-1": "",
         "1.5": "",
-        "start_line {invalid_line:?} should be rejected": ""
+        "start_line {invalid_line:?} should be rejected": "start_line {invalid_line:?} 应被拒绝"
     },
     "zed/crates/agent/src/tools/terminal_tool.rs": {
         "terminal": "",
@@ -4540,7 +4540,7 @@
         "prev-hunk": "",
         "Previous Hunk": "上一个代码块",
         "agent_diff": "",
-        "generating": "",
+        "generating": "生成中",
         "Generating Changes…": "正在生成更改…",
         "hunk-up": "",
         "hunk-down": "",
@@ -4548,7 +4548,7 @@
         "Reject All": "全部拒绝",
         "keep-all": "",
         "Keep All": "全部保留",
-        "review": "",
+        "review": "审查",
         "Review All Files": "审查所有文件",
         "editor_agent_diff": "",
         "/test": "",
@@ -5259,7 +5259,11 @@
         "resource URI should reference the file path": "资源 URI 应引用文件路径",
         "src/lib.rs": "",
         "<<<<<<< main\\nfn a() {}\\n=======\\nfn a_v2() {}\\n>>>>>>> dev": "",
-        "main": ""
+        "main": "",
+        "saved-session": "",
+        "Sidebar title": "侧边栏标题",
+        "saved thread should load": "已保存的对话线程应能加载",
+        "sidebar entry should still exist": "侧边栏条目应仍然存在"
     },
     "zed/crates/agent_ui/src/agent_registry_ui.rs": {
         "claude-acp": "",
@@ -15679,7 +15683,7 @@
         ",": "",
         "RUST_DEFAULT_PACKAGE_RUN": "",
         "RUST_TARGET_DIR": "",
-        "Rust": "",
+        "Rust": "Rust",
         "run": "",
         "-p": "",
         "Check (package: {})": "检查 (package: {})",
@@ -15978,10 +15982,10 @@
         "includeInlayEnumMemberValueHints": "",
         "completions": "",
         "completeFunctionCalls": "",
-        "TypeScript": "",
-        "JavaScript": "",
+        "TypeScript": "TypeScript",
+        "JavaScript": "JavaScript",
         "javascript": "",
-        "TSX": "",
+        "TSX": "TSX",
         "typescriptreact": "",
         "missing executable in directory {container_dir:?}": "目录 {container_dir:?} 中缺少可执行文件",
         "tsx": "",
@@ -16237,7 +16241,7 @@
         "USING TEST LIVEKIT": "",
         "USING REAL LIVEKIT": "",
         "cmd-q": "",
-        "Zed": "",
+        "Zed": "Zed",
         "Quit": "退出",
         "LIVEKIT_URL": "",
         "http://localhost:7880": "",
@@ -16537,12 +16541,12 @@
         "Welcome Page Telemetry Diagnostics Toggled": "",
         "Base Keymap": "基础键位映射",
         "base_keymap_selection": "",
-        "VS Code": "",
-        "JetBrains": "",
-        "Sublime Text": "",
-        "Atom": "",
-        "Emacs": "",
-        "Cursor": "",
+        "VS Code": "VS Code",
+        "JetBrains": "JetBrains",
+        "Sublime Text": "Sublime Text",
+        "Atom": "Atom",
+        "Emacs": "Emacs",
+        "Cursor": "光标",
         "Welcome Keymap Changed": "",
         "onboarding-vim-mode": "",
         "Vim Mode": "Vim 模式",
@@ -16557,8 +16561,8 @@
         "Import Settings": "导入设置",
         "Automatically pull your settings from other editors": "从其他编辑器自动拉取您的设置",
         "basics-page": "",
-        "Zed": "",
-        "TextMate": "",
+        "Zed": "Zed",
+        "TextMate": "TextMate",
         "claude-acp": "",
         "codex-acp": "",
         "github-copilot-cli": "",
@@ -16571,7 +16575,7 @@
         "signing-in": "",
         "Start Free Trial": "开始免费试用",
         "zed-agent-onboarding": "",
-        "Zed Agent": "",
+        "Zed Agent": "Zed Agent",
         "Start Trial Clicked": "",
         "post-sign-in": "",
         "Welcome Zed Agent Sign In Clicked": "",
@@ -17217,7 +17221,8 @@
         "Move Tab to New Window": "将标签页移动到新窗口",
         "Show All Tabs": "显示所有标签页",
         "window tabs": "window tabs",
-        "plus": "plus"
+        "plus": "plus",
+        "system-window-tabs": ""
     },
     "zed/crates/project/src/agent_server_store.rs": {
         "command": "",
@@ -17475,7 +17480,9 @@
         "3.0.0": "",
         "agent-a should be registered": "agent-a 应当已注册",
         "agent-b should be registered": "agent-b 应当已注册",
-        "agent-b tx should have been transferred": "agent-b 的 tx 应当已转移"
+        "agent-b tx should have been transferred": "agent-b 的 tx 应当已转移",
+        "unsupported platform": "不支持的平台",
+        "' or '": ""
     },
     "zed/crates/project/src/debugger/dap_command.rs": {
         "zed": "",
@@ -18205,7 +18212,8 @@
         "2.txt": "",
         "group should span both folders before removal": "移除前该组应覆盖两个文件夹",
         "a worktree should exist": "应存在一个工作树",
-        "the removed folder should no longer appear in any This Window group, got {groups_after:?}": "已移除的文件夹不应再出现在任何“此窗口”组中,实际为 {groups_after:?}"
+        "the removed folder should no longer appear in any This Window group, got {groups_after:?}": "已移除的文件夹不应再出现在任何“此窗口”组中,实际为 {groups_after:?}",
+        "éx": ""
     },
     "zed/crates/recent_projects/src/remote_connections.rs": {
         "fetching remote workspace position from db": "从数据库获取远程工作区位置",
@@ -18267,7 +18275,18 @@
         "should have remote client": "应当具有远程客户端",
         "Reconnect": "重新连接",
         "reconnect should succeed but got: {:?}": "重新连接应当成功,但得到:{:?}",
-        "project should be remote after reconnect": "重新连接后项目应当是远程项目"
+        "project should be remote after reconnect": "重新连接后项目应当是远程项目",
+        "/C:/": "",
+        "/C:/project/src/lib.rs": "",
+        "/a:12": "",
+        "C:/": "",
+        "C:/project/src/lib.rs": "",
+        "/a": "",
+        "{path_style:?}": "",
+        "windows": "",
+        "example.com": "",
+        "a drive-letter URL path into the open project should reuse its window": "指向已打开项目的盘符 URL 路径应复用其窗口",
+        "src/lib.rs": ""
     },
     "zed/crates/recent_projects/src/remote_servers.rs": {
         "windows": "",
@@ -23412,8 +23431,8 @@
         "https://zed.dev/docs/themes": "",
         "more-themes": "",
         "Install Themes": "安装主题",
-        "active": "",
-        "theme selector": "",
+        "active": "活跃",
+        "theme selector": "主题选择器",
         "One Dark": "",
         "test-light": "",
         "Test Light": "",
@@ -27681,7 +27700,12 @@
         "claude-test-thinking": "",
         "claude-test-default": "",
         "model should have beta headers": "",
-        "claude-test-effort": ""
+        "claude-test-effort": "",
+        "claude-fable-5-2": "",
+        "claude-mythos-5-2": "",
+        "{model_id} supports fast mode": "{model_id} 支持快速模式",
+        "{model_id} supports compaction": "{model_id} 支持上下文压缩",
+        "{model_id} rejects forced tool use": "{model_id} 拒绝强制工具调用"
     },
     "zed/crates/dap_adapters/src/go.rs": {
         "Delve": "Delve",
@@ -30392,9 +30416,9 @@
         "Error parsing input JSON: EOF while parsing a string at line 1 column 17": "解析输入 JSON 时出错:解析字符串时在第 1 行第 17 列遇到 EOF",
         "Expected forwarded JSON parse error, got: {content_text}": "预期转发的 JSON 解析错误,实际为:{content_text}",
         "Should not contain orphaned sender error, got: {content_text}": "不应包含孤立发送者错误,实际为:{content_text}",
-        "Auto title\\n": "",
+        "Auto title\\n": "自动标题\\n",
         "Auto title": "自动标题",
-        "Manual title\\n": "",
+        "Manual title\\n": "手动标题\\n",
         "Manual title": "手动标题"
     },
     "zed/crates/agent/src/tests/test_tools.rs": {
@@ -30830,10 +30854,10 @@
         "1\\\\.11": "",
         "path": "",
         "/root/notes.md": "",
-        "grep input with unknown fields should be rejected": "",
+        "grep input with unknown fields should be rejected": "包含未知字段的 grep 输入应被拒绝",
         "unknown field `path`": "",
         "include_pattern": "",
-        "unexpected error message: {error}": ""
+        "unexpected error message: {error}": "意外错误信息:{error}"
     },
     "zed/crates/agent/src/tools/list_directory_tool.rs": {
         "Cannot list directory": "无法列出目录",
@@ -31421,7 +31445,7 @@
         "{}.{}k": "",
         "{}M": "",
         "{}.{}M": "",
-        "Forced rules-to-skills migration result: {result:?}": "",
+        "Forced rules-to-skills migration result: {result:?}": "强制执行的规则到技能迁移结果:{result:?}",
         "Rules-to-skills migration rerun. Please double-check AGENTS.md and Skills for missing or duplicated prompts.": "已重新运行规则到技能的迁移。请仔细检查 AGENTS.md 和 Skills,确认没有缺失或重复的提示词。",
         "1": "",
         "NewTerminalThread should be visible by default": "",
@@ -31490,7 +31514,7 @@
         "\\t\\tx++\\n": "",
         "\\t}": "",
         "let mut x = 0;\\nx += 1;": "",
-        "- Improved; `cmd+click` behavior. Now requires `cmd` to be pressed before the click starts or it doesn't run. ([#44579](https://github.com/zed-industries/zed/pull/44579); thanks [Zachiah](https://github.com/Zachiah))": "",
+        "- Improved; `cmd+click` behavior. Now requires `cmd` to be pressed before the click starts or it doesn't run. ([#44579](https://github.com/zed-industries/zed/pull/44579); thanks [Zachiah](https://github.com/Zachiah))": "- 改进:`cmd+click` 行为。现在要求在点击开始前先按下 `cmd`,否则不会执行。([#44579](https://github.com/zed-industries/zed/pull/44579);感谢 [Zachiah](https://github.com/Zachiah))",
         "tool_1": "",
         "tool_2": "",
         "Lorem ipsum dolor": "",
@@ -31524,7 +31548,7 @@
         "partial": "",
         "Inline assistant response ended before completing `rewrite_section`": "内联助手响应在完成 `rewrite_section` 之前结束",
         "Inline assistant response was interrupted (MaxTokens)": "内联助手响应被中断(MaxTokens)",
-        "Partial failure": "",
+        "Partial failure": "部分失败",
         "Cannot rewrite selection": "无法重写所选内容",
         "Inline assistant called `rewrite_section` after `failure_message`": "内联助手在 `failure_message` 之后调用了 `rewrite_section`",
         "Cannot rewrite": "无法重写",
@@ -32524,7 +32548,8 @@
         "signed_in": "",
         "checksum_matched": "",
         "country": "",
-        "is_staff": ""
+        "is_staff": "",
+        "desktop_environment": ""
     },
     "zed/crates/collab/src/api/extensions.rs": {
         "/extensions": "",
@@ -33868,7 +33893,15 @@
         "# Project's README": "",
         "feat: add awesome feature": "",
         "Should update git state": "应当更新 git 状态",
-        "Guest should be able to load the host's commit template": "访客应能加载主机的提交模板"
+        "Guest should be able to load the host's commit template": "访客应能加载主机的提交模板",
+        "sha1": "",
+        "opening the project with Changes selected should not fetch history": "",
+        "feature": "",
+        "changed": "",
+        "sha2": "",
+        "switching branches with Changes selected should not fetch history": "",
+        "branch updates held": "",
+        "opening History loads the host's commits": ""
     },
     "zed/crates/collab/tests/integration/integration_tests.rs": {
         "user_a": "",
@@ -35090,7 +35123,19 @@
         "unexpected HTTP request": "意外的 HTTP 请求",
         "https://enterprise.example": "",
         "sign out": "退出登录",
-        "https://enterprise.example/copilot-agent": ""
+        "https://enterprise.example/copilot-agent": "",
+        "2026-08-01": "",
+        "input_price": "",
+        "output_price": "",
+        "cache_read_price": "",
+        "cache_write_price": "",
+        "token_prices": "",
+        "batch_size": "",
+        "long_context": "",
+        "claude-opus-5": "",
+        "Claude Opus 5": "",
+        "gpt-6-sol": "",
+        "GPT-6 Sol": ""
     },
     "zed/crates/copilot_chat/src/responses.rs": {
         "Option::is_none": "",
@@ -37034,7 +37079,8 @@
         "Streaming not supported with batching client": "批处理客户端不支持流式传输",
         "Import batches is only supported with batching client": "只有批处理客户端支持导入批次",
         "Uploading batch with {} requests (~{:.2} MB)": "正在上传包含 {} 个请求的批次 (~{:.2} MB)",
-        "Uploading final batch with {} requests (~{:.2} MB)": "正在上传包含 {} 个请求的最终批次 (~{:.2} MB)"
+        "Uploading final batch with {} requests (~{:.2} MB)": "正在上传包含 {} 个请求的最终批次 (~{:.2} MB)",
+        "system": ""
     },
     "zed/crates/edit_prediction_cli/src/example.rs": {
         "Option::is_none": "",
@@ -38774,7 +38820,10 @@
         "aBc": "",
         "Abc": "",
         "Ab": "",
-        "aB": ""
+        "aB": "",
+        "eprint": "",
+        "print": "",
+        "{function}/{arity}": ""
     },
     "zed/crates/editor/src/code_context_menus.rs": {
         "bug: completion selected_item >= entries.len(): {} >= {}": "bug: 补全 selected_item >= entries.len(): {} >= {}",
@@ -52825,7 +52874,10 @@
         "<!--\\nmulti-line\\ncomment\\n-->\\n\\n# ![](icon.png)": "",
         "<!-- one -->\\n<!-- two -->\\n\\n# ![](icon.png)": "",
         "[zed]: https://zed.dev\\n\\n# ![](icon.png)": "",
-        "heading in {source:?} should sit at the top like it does without the leading content": "在 {source:?} 中的标题应像没有前置内容时一样位于顶部"
+        "heading in {source:?} should sit at the top like it does without the leading content": "在 {source:?} 中的标题应像没有前置内容时一样位于顶部",
+        "--------я": "",
+        "- foo": "",
+        "quad is painted": ""
     },
     "zed/crates/markdown/src/parser.rs": {
         "Fenced": "围栏式",
@@ -54211,7 +54263,9 @@
         "excerpt path key index does not match path key: {:#?}": "摘录的路径键索引与路径键不匹配:{:#?}",
         "buffer snapshot not found for excerpt": "找不到摘录对应的缓冲区快照",
         "buffer entity not found for excerpt": "找不到摘录对应的缓冲区实体",
-        "Path keys must be in ascending order: {:?} > {:?}": "路径键必须按升序排列:{:?} > {:?}"
+        "Path keys must be in ascending order: {:?} > {:?}": "路径键必须按升序排列:{:?} > {:?}",
+        "stale snapshot for buffer {buffer_id:?}": "缓冲区 {buffer_id:?} 的快照已过期",
+        "stale status for buffer {buffer_id:?}": "缓冲区 {buffer_id:?} 的状态已过期"
     },
     "zed/crates/multi_buffer/src/multi_buffer_tests.rs": {
         "  Inserted": "  已插入",
@@ -54549,7 +54603,9 @@
         "the hunk-interior anchor stays one character into the phantom row": "代码块内部的锚点保持在幻影行中的一个字符处",
         "the shared-cursor batch path must agree with individual resolution": "共享游标的批量路径必须与逐个解析的结果一致",
         "expanding diff hunk {:?}. excerpt range: {:?}, buffer {:?}": "正在展开差异代码块 {:?}。摘录范围:{:?},缓冲区 {:?}",
-        "hunk {hunk_range:?} already expanded in excerpt": "代码块 {hunk_range:?} 已在摘录中展开"
+        "hunk {hunk_range:?} already expanded in excerpt": "代码块 {hunk_range:?} 已在摘录中展开",
+        "file": "",
+        "xabc": ""
     },
     "zed/crates/net/src/async_net.rs": {
         "windows": ""
@@ -54912,7 +54968,10 @@
         "error building request body for {provider}'s API": "为 {provider} API 构建请求体时出错",
         "error sending HTTP request to {host} for {provider}": "向 {host} 发送 {provider} 的 HTTP 请求时出错",
         "I/O error reading response from {provider}'s API": "读取 {provider} API 响应时发生 I/O 错误",
-        "error deserializing {provider}'s API response": "反序列化 {provider} API 响应时出错"
+        "error deserializing {provider}'s API response": "反序列化 {provider} API 响应时出错",
+        "developer": "",
+        "gpt-6.1-terra": "",
+        "GPT-6.1 Terra": "GPT-6.1 Terra"
     },
     "zed/crates/open_ai/src/responses.rs": {
         "Vec::is_empty": "",
@@ -55405,7 +55464,8 @@
         "linux": "",
         "freebsd": "",
         "left-window-controls": "",
-        "right-window-controls": ""
+        "right-window-controls": "",
+        "macos": ""
     },
     "zed/crates/platform_title_bar/src/platforms/platform_linux.rs": {
         "generic-window-controls": "",
@@ -55651,7 +55711,11 @@
         "fetching icon for {}": "正在获取 {} 的图标",
         "requesting {url}": "正在请求 {url}",
         "reading response from {url}": "正在读取来自 {url} 的响应",
-        "timed out after {}s while fetching {url}": "获取 {url} 时在 {} 秒后超时"
+        "timed out after {}s while fetching {url}": "获取 {url} 时在 {} 秒后超时",
+        "linux-aarch64-musl": "",
+        "linux-x86_64-musl": "",
+        "freebsd": "",
+        "riscv64": ""
     },
     "zed/crates/project/src/buffer_store.rs": {
         "missing variant": "缺少变体",
@@ -56446,7 +56510,12 @@
         "origin/main": "",
         "staged\\n": "",
         "reloads that fail the same way again must not announce a new file list": "以相同方式再次失败的重载不得宣告新的文件列表",
-        "dir{index}/file.rs": ""
+        "dir{index}/file.rs": "",
+        "new\\n": "",
+        "valid oid": "",
+        "blob is missing": "",
+        "oid does not exist": "",
+        "retry loads the blob": ""
     },
     "zed/crates/project/src/image_store.rs": {
         "{}": "{}",
@@ -57381,7 +57450,8 @@
         "worktree tasks should only re-resolve against their own worktree's context": "工作树任务应只基于其自身工作树的上下文重新解析",
         "item": "",
         "echo item": "",
-        "the active item context should take precedence over the worktree context": "活动项的上下文应优先于工作树上下文"
+        "the active item context should take precedence over the worktree context": "活动项的上下文应优先于工作树上下文",
+        "last_scheduled_task_id": ""
     },
     "zed/crates/project/src/task_store.rs": {
         "no location given for task context handling": "处理任务上下文时未提供位置",
@@ -59682,7 +59752,21 @@
         "submodule should not be detected as a linked worktree": "子模块不应被检测为链接工作树",
         "สวัสดีชาวโลกนี่คือข้อความทดสอบภาษาไทย": "",
         "[{": "",
-        "}]": ""
+        "}]": "",
+        "emmet": "",
+        "no-triggers": "",
+        "completion": "",
+        "triggerCharacters": "",
+        "available": "",
+        "a.": "",
+        "open buffer with both language servers": "用两个语言服务器打开缓冲区",
+        "start primary server": "启动主服务器",
+        "start secondary server": "启动辅助服务器",
+        "deserialize the collaborator's old buffer state": "反序列化协作者旧的缓冲区状态",
+        "additional-completion-trigger": "",
+        "register an additional trigger on the primary server": "在主服务器上注册额外的触发字符",
+        "request completions from both servers": "向两个服务器请求补全",
+        "the primary server registered '.', even after stale trigger replay: {replay_stale_state}": "主服务器注册了 '.',即使在重放过期触发器之后:{replay_stale_state}"
     },
     "zed/crates/project/tests/integration/search.rs": {
         "file": "",
@@ -59771,7 +59855,8 @@
         "ЖЕТОН": "",
         "/dir": "",
         "/dir/legacy.txt": "",
-        "dir/legacy.txt": ""
+        "dir/legacy.txt": "",
+        "x\\naaa": ""
     },
     "zed/crates/project/tests/integration/search_history.rs": {
         "No current selection should be set for the default search history": "默认搜索历史记录不应设置当前选择",
@@ -59854,7 +59939,27 @@
         "With only .vscode tasks, they should appear": "只有 .vscode 任务时,它们应当出现",
         "zed_task": "",
         "With both .zed and .vscode tasks, only .zed tasks should appear": "同时存在 .zed 和 .vscode 任务时,应只显示 .zed 任务",
-        "Previously used .vscode tasks should not appear when .zed tasks exist, got: {resolved:?}": "存在 .zed 任务时,不应出现此前使用过的 .vscode 任务,实际为:{resolved:?}"
+        "Previously used .vscode tasks should not appear when .zed tasks exist, got: {resolved:?}": "存在 .zed 任务时,不应出现此前使用过的 .vscode 任务,实际为:{resolved:?}",
+        "After global tasks update, usages of the tasks with unchanged definitions are kept": "全局任务更新后,定义未变的任务的使用记录会被保留",
+        "first": "",
+        "second": "",
+        "Saving the file without changes should keep the newest task": "在未作修改的情况下保存文件应保留最新的任务",
+        "edited": "",
+        "Editing the newest task should not make the older task the rerun target": "编辑最新的任务不应让较旧的任务成为重新运行目标",
+        "An edited task should not rerun with its old definition": "已编辑的任务不应按其旧定义重新运行",
+        "An unchanged task should stay reachable by its id": "未变更的任务应仍可通过其 id 访问",
+        "Scheduling a task should restore the rerun target": "调度任务应恢复重新运行目标",
+        "Editing an older task should not affect the rerun target": "编辑较旧的任务不应影响重新运行目标",
+        "third": "",
+        "Deleting the newest task should make the previous one the rerun target": "删除最新的任务应使前一个任务成为重新运行目标",
+        "Deleting an older task should not affect the rerun target": "删除较旧的任务不应影响重新运行目标",
+        "Deleting an already invalidated task should not make an older task the rerun target": "删除已失效的任务不应让较旧的任务成为重新运行目标",
+        "Deleting an older task should not restore the invalidated rerun target": "删除较旧的任务不应恢复已失效的重新运行目标",
+        "task": "",
+        "other": "",
+        "nested/.zed": "",
+        "new": "",
+        "[]": ""
     },
     "zed/crates/project/tests/integration/trusted_worktrees.rs": {
         "global should be set": "",
@@ -61478,7 +61583,11 @@
         "worktree has a root": "工作树有一个根目录",
         "/outside/file.txt": "",
         "entry has a row in the list": "条目在列表中有一行",
-        "list is laid out": "列表已完成布局"
+        "list is laid out": "列表已完成布局",
+        "File or directory name cannot be empty.": "文件或目录名不能为空。",
+        "Unexpected validation state: {validation_state:?}": "意外的校验状态:{validation_state:?}",
+        " a ": "",
+        "File or directory name contains leading or trailing whitespace.": "文件或目录名包含前导或尾随空格。"
     },
     "zed/crates/prompt_store/src/prompts.rs": {
         ".rules": "",
@@ -61808,7 +61917,9 @@
         "\\n": "",
         "mock stdio bootstrap read {} hex digits, expected {}\\n": "mock stdio bootstrap 读取了 {} 个十六进制数字,预期 {}\\n",
         "message interception requires a mock connection": "消息拦截需要模拟连接",
-        "message interceptors must be installed before connecting": "消息拦截器必须在连接前安装"
+        "message interceptors must be installed before connecting": "消息拦截器必须在连接前安装",
+        "this requires a mock connection": "这需要模拟连接",
+        "the mock connection must be configured before connecting": "必须在连接前配置模拟连接"
     },
     "zed/crates/remote_server/build.rs": {
         "build scripts are exempt": "构建脚本不适用此规则",
@@ -78412,8 +78523,8 @@
         "indirect prompt produces a pty-safe git command": "间接提示词会生成对 pty 安全的 git 命令"
     },
     "zed/crates/agent/src/tools/evals/write_file.rs": {
-        "Tool Input:\\n{:#?}": "",
-        "Text After:\\n{}": "",
+        "Tool Input:\\n{:#?}": "工具输入:\\n{:#?}",
+        "Text After:\\n{}": "文本内容(之后):\\n{}",
         "agent tests": "",
         "/root": "",
         "ZED_AGENT_MODEL": "",
@@ -78762,9 +78873,9 @@
         "^root/secrets/": "",
         "root/secrets/key.pem": "",
         "new": "",
-        "Edit `root/secrets/key.pem`": "",
+        "Edit `root/secrets/key.pem`": "编辑 `root/secrets/key.pem`",
         "/root/secrets/key.pem": "",
-        "the file must not be written before the prompt is answered": ""
+        "the file must not be written before the prompt is answered": "在提示得到答复前不得写入文件"
     },
     "zed/crates/agent_servers/src/acp/debug_log.rs": {
         "jsonrpc": "",
@@ -79977,13 +80088,13 @@
         "doc": "",
         "# Doc": "",
         "/tmp/plan.md": "",
-        "markdown plan": "",
-        "the plan with a file is visible": "",
+        "markdown plan": "Markdown 计划",
+        "the plan with a file is visible": "带文件的计划可见",
         "plan_removed": "",
-        "removing the visible plan falls back to the remaining one": "",
+        "removing the visible plan falls back to the remaining one": "移除可见计划后会回退到剩余的计划",
         "# Plan": "",
-        "{replacement} must replace the plan": "",
-        "v1 plan operations must only be offered behind acp-beta": "",
+        "{replacement} must replace the plan": "{replacement} 必须替换该计划",
+        "v1 plan operations must only be offered behind acp-beta": "v1 计划操作只能在 acp-beta 之后提供",
         "large": "",
         "fast": "",
         "serialize": ""
@@ -80824,10 +80935,10 @@
         "stale owner": "过期所有者",
         "a stale owner cannot submit through its replacement": "过期所有者不能通过其替代者提交",
         "not sent": "未发送",
-        "initial config options require the ACP beta flag": "",
+        "initial config options require the ACP beta flag": "初始配置选项需要 ACP beta 标志",
         "without-beta": "",
-        "defaults the agent applied are not sent again": "",
-        "initial config options require the options capability": ""
+        "defaults the agent applied are not sent again": "智能体已应用的默认值不会再次发送",
+        "initial config options require the options capability": "初始配置选项需要 options 能力"
     },
     "zed/crates/agent_settings/src/user_agents_md.rs": {
         "no user `AGENTS.md`": "无用户 `AGENTS.md`",
@@ -81907,7 +82018,7 @@
         "Should use session cwd when it's inside the project": "当会话 cwd 位于项目内时,应使用会话 cwd",
         "Do something harmful": "做些有害的事",
         "Expected refusal error to be set": "预期应设置拒绝错误",
-        "Error Loading Codex CLI": "",
+        "Error Loading Codex CLI": "加载 Codex CLI 时出错",
         "Tab title should show the agent name with an error prefix": "标签页标题应显示带错误前缀的助手名称",
         "Invalid gzip header": "无效的 gzip 头",
         "Error callout should contain the underlying extraction error, got: {msg}": "错误提示应包含底层的解压错误,实际为:{msg}",
@@ -82708,7 +82819,32 @@
         "{result:?}": "",
         "close-capable": "",
         "CloseCapableConnection": "",
-        "close-capable-session": ""
+        "close-capable-session": "",
+        "third": "",
+        "before": "",
+        "before typing": "",
+        "before typing typing": "",
+        " typing": "",
+        "См. [док](https://exa": "",
+        "expected an assistant message": "预期一条助手消息",
+        "expected a message chunk": "预期一个消息块",
+        "message markdown": "消息 markdown",
+        "streamed message": "流式消息",
+        "mple.com) далее и ещё": "",
+        "См. [док](https://example.com) далее и ещё": "",
+        "emptied plan": "已清空的计划",
+        "ls && git status && git log": "",
+        "pipeline": "",
+        "toggling a pattern must not select a dropdown choice": "切换模式时不得选中下拉选项",
+        "MENU_ITEM-Always for `cargo test` commands": "",
+        "the rendered persistent dropdown should offer the cargo pattern": "渲染出的常驻下拉菜单应提供 cargo 模式",
+        "delegate": "",
+        "Delegate": "",
+        "tool call": "",
+        "tool-call-session-reference-0-1": "",
+        "an unknown session is not a link": "未知会话不是链接",
+        "tool-call-session-reference-0-0": "",
+        "the reference links to its session": "该引用链接到其会话"
     },
     "zed/crates/agent_ui/src/conversation_view/elicitation.rs": {
         "{} is required": "{} 为必填项",
@@ -83826,7 +83962,36 @@
         "subagent-fullscreen-{entry_ix}": "",
         "Make Subagent Full Screen": "使子智能体全屏",
         "Subagent Maximized": "子智能体已最大化",
-        "subagent-entries-{}-{}": ""
+        "subagent-entries-{}-{}": "",
+        "open-plan-file": "",
+        "Open Plan File": "打开计划文件",
+        "plan_markdown": "",
+        "tool-call-session-reference-{entry_ix}-{context_ix}": "",
+        "private thought": "",
+        " \\n\\t": "",
+        "first part": "",
+        "last part": "",
+        "another private thought": "",
+        "next turn private thought": "",
+        "next turn response": "",
+        "next prompt": "",
+        "request": "",
+        "next request": "",
+        "first part\\n\\nlast part": "",
+        "notes.txt": "",
+        "/project/screenshot.png": "",
+        "\\x89PNG\\r\\n\\x1a\\n\\0\\0\\0\\rIHDR\\0\\0\\0\\x01": "",
+        "active thread view": "",
+        "Read": "",
+        "tool call": "",
+        "location should open": "",
+        "read-image": "",
+        "location": "",
+        "binary files never resolve to a buffer": "",
+        "screenshot.png": "",
+        "read-text": "",
+        "/project/notes.txt": "",
+        "text file should open in an editor": ""
     },
     "zed/crates/agent_ui/src/diagnostics.rs": {
         "```": "",
@@ -84220,7 +84385,13 @@
         "/project/file.rs": "",
         "line 1\\nline 2\\n": "",
         "line 3\\nline 4\\n": "",
-        "selection mention anchor should map to a buffer": "选择提及锚点应映射到缓冲区"
+        "selection mention anchor should map to a buffer": "选择提及锚点应映射到缓冲区",
+        "command": "",
+        "skill": "",
+        "pdf": "",
+        "Read PDFs": "",
+        "/future": "",
+        "other command kinds are not invoked as slash commands": ""
     },
     "zed/crates/agent_ui/src/mode_selector.rs": {
         "Failed to set session mode: {:?}": "设置会话模式失败:{:?}",
@@ -84742,7 +84913,9 @@
         "HE": "",
         "xyz": "",
         "café": "",
-        "fé": ""
+        "fé": "",
+        "threads-archive-header": "",
+        "threads-archive-header-search": ""
     },
     "zed/crates/agent_ui/src/ui/sandbox_status_tooltip.rs": {
         "You have sandboxing disabled in settings.": "你在设置中禁用了沙箱。",
@@ -85068,7 +85241,36 @@
         "iterations": "",
         "message": "",
         "expected message_delta event": "预期 message_delta 事件",
-        "iterations expected": "预期迭代次数"
+        "iterations expected": "预期迭代次数",
+        "claude-fable-5-2": "",
+        "claude-mythos-5-2": "",
+        "Anthropic system updates must contain only text": "",
+        "Prefer terse answers.\\n": "",
+        "system": "",
+        "messages": "",
+        "Another user message.": "",
+        "You are helpful.\\n\\nPrefer terse answers.\\n": "",
+        "cyber": "",
+        "stop_details": "",
+        "category": "",
+        "explanation": "",
+        "private user content": "",
+        "message_start": "",
+        "id": "",
+        "msg_1": "",
+        "assistant": "",
+        "model": "",
+        "input_transformations": "",
+        "thinking_dropped": "",
+        "path": "",
+        "messages.1.content.0": "",
+        "reason": "",
+        "prefix_binding_mismatch": "",
+        "thinking_mismatch_allowed": "",
+        "messages.3.content.0": "",
+        "some_future_transformation": "",
+        "messages.5.content.0": "",
+        "some_future_reason": ""
     },
     "zed/crates/audio/src/audio_pipeline.rs": {
         "Audio does not sound correct without optimizations. Use a release build to debug audio issues": "音频在未优化的情况下无法正常播放。请使用 release 构建来调试音频问题",
@@ -99205,7 +99407,8 @@
         "path": "",
         "pieCircle": "",
         "stroke": "",
-        "svg": ""
+        "svg": "",
+        "mindmapDiagram": ""
     },
     "zed/crates/mermaid_render/src/postprocess/accent_colors/class_diagram.rs": {
         "g": "",
@@ -99218,7 +99421,10 @@
         "polygon": "",
         "ellipse": "",
         "text": "",
-        "tspan": ""
+        "tspan": "",
+        "id": "",
+        "use": "",
+        "href": ""
     },
     "zed/crates/mermaid_render/src/postprocess/accent_colors/mindmap.rs": {
         "g": "",
@@ -99234,7 +99440,8 @@
         "section-": "",
         "-1": "",
         "section-root section--1": "",
-        "section-{rest}": ""
+        "section-{rest}": "",
+        "data-merman-source-classes": ""
     },
     "zed/crates/mermaid_render/src/postprocess/accent_colors/sequence_diagram.rs": {
         "rect": "",
@@ -99417,7 +99624,70 @@
         "SVG parsing failed": "SVG 解析失败",
         "User": "",
         "+String name": "",
-        "Application": ""
+        "Application": "",
+        "span.edgeLabel.edgeLabel {{ background: {edge_label_background}; }}": "",
+        "zed.svg-renderer": "",
+        "1": "",
+        "failed to measure mermaid text: {error}": "无法测量 Mermaid 文本:{error}",
+        "the diagram has too much text": "图表文本过多",
+        "normal": "",
+        "secure": "",
+        "merman has no default secure keys": "merman 没有默认的安全键",
+        "fontSize": "",
+        "look": "",
+        "classic": "",
+        "wrappingWidth": "",
+        "minNodeWidth": "",
+        "state": "",
+        "class User {\\n    +String WWWWWWWWWWWWWWWWWWWW\\n}": "",
+        "IBM Plex Sans": "",
+        "classDiagram\\nclass A {\\n    +MMMMMMMMMMMMMMMM()\\n}": "",
+        "Lilex": "",
+        "classDiagram\\nclass iiiiiiiiii {\\n    +WWWWWWWW()\\n}": "",
+        "classDiagram\\n%%{{init: {{\\\"themeVariables\\\": {{\\\"fontSize\\\": \\\"1.5em\\\"}}}}}}%%\\n{wide_members}": "",
+        "classDiagram\\n%%{{init: {{\\\"themeVariables\\\": {{\\\"fontSize\\\": \\\"64px\\\"}}}}}}%%\\n{wide_members}": "",
+        "stateDiagram-v2\\n    [*] --> Teardown\\n    Teardown : members kicked\\n    Teardown : group deleted": "",
+        "erDiagram\\n    ORDER {\\n        string shipping_address_line_one\\n    }": "",
+        "mindmap\\n    root((Root))\\n        First\\n        second[A<br/>B]": "",
+        "classDiagram\\nclass 顧客 {\\n    +文字列 名前😀\\n}": "",
+        "no label viewports in: {svg}": "以下内容中没有标签视口:{svg}",
+        "measuring failed": "测量失败",
+        "{:?} is {text_width}px wide in a {}px viewport of: {source}": "{:?} 宽度为 {text_width}px,位于 {}px 的视口中:{source}",
+        "members kicked": "",
+        "group deleted": "",
+        "descriptions overlap: {first:?} and {second:?}": "描述重叠:{first:?} 和 {second:?}",
+        "#{:02x}{:02x}{:02x}": "",
+        "classDiagram\\n    class User": "",
+        "flowchart LR\\n    A[Label]\\n    style A letter-spacing:3px,word-spacing:6px": "",
+        "Label": "",
+        "%%{init: {\\\"themeCSS\\\": \\\".node rect { fill: #abcdef; }\\\"}}%%\\nflowchart LR\\n    A --> B": "",
+        "flowchart LR\\n%%{init: {\\\"themeVariables\\\": {\\\"primaryColor\\\": \\\"#abcdef\\\", \\\"lineColor\\\": \\\"#abcdef\\\"}}}%%\\n    A --> B": "",
+        "#abcdef": "",
+        "{source}": "",
+        "classDiagram\\n    Animal <|-- Dog : inherits": "",
+        "fill=": "",
+        "": "",
+        "classDiagram\\n    class A {\\n        +e\\u{301}\\u{302}\\u{303}\\u{304}\\u{306}\\u{307}\\u{308}\\u{30a}\\n    }": "",
+        "flowchart TD\\nA[\\\"{}{}\\\"]": "",
+        "\\u{200b}\\u{200c}": "",
+        "M ": "",
+        "render succeeded": "渲染成功",
+        "failed to measure mermaid text: the diagram has too much text": "无法测量 Mermaid 文本:图表文本过多",
+        "label": "",
+        "SVG is not well-formed": "SVG 格式不正确",
+        "svg": "",
+        "width": "",
+        "text": "",
+        "style": "",
+        "label style is missing a declaration": "标签样式缺少声明",
+        "label is not UTF-8": "标签不是 UTF-8 编码",
+        "font-size": "",
+        "px": "",
+        "label font size is not in pixels": "标签字号不是以像素为单位",
+        "font-weight": "",
+        "font-style": "",
+        "attribute is not well-formed": "属性格式不正确",
+        "text is missing": "缺少文本"
     },
     "zed/crates/mermaid_render/tests/check_invalid_attrs.rs": {
         "flowchart": "",
@@ -99492,7 +99762,9 @@
         "expected zed-accent-N classes on tspan elements in sequence diagram": "时序图的 tspan 元素上应包含 zed-accent-N 类",
         "{name}: render failed (skipped): {e}": "{name}:渲染失败(已跳过):{e}",
         "Found {} issues in merman SVG output (rgb theme):\\n\\n{}": "在 merman SVG 输出(rgb 主题)中发现 {} 个问题:\\n\\n{}",
-        "\\n": ""
+        "\\n": "",
+        "zed-accent-0": "",
+        "zed-accent-1": ""
     },
     "zed/crates/migrator/src/migrations/m_2025_01_27/settings.rs": {
         "auto_indent": "",
@@ -100104,7 +100376,16 @@
         "Set up the project.": "",
         "my-compatible-endpoint": "",
         "expected finished provider compaction state": "预期提供商压缩状态已完成",
-        "unfinished compaction": "未完成的压缩"
+        "unfinished compaction": "未完成的压缩",
+        "gpt-6.1-terra": "",
+        "ultrafast": "",
+        "response.incomplete": "",
+        "response": "",
+        "incomplete_details": "",
+        "reason": "",
+        "Declined": "",
+        "developer": "",
+        "Use the updated project context.": "使用更新后的项目上下文。"
     },
     "zed/crates/openai_subscribed/src/openai_subscribed.rs": {
         "openai-subscribed": "",
@@ -100368,7 +100649,7 @@
         "https://opencode.ai/zen/go/": "",
         "test-key": "",
         "opencode-go": "",
-        "OpenCode Go": "",
+        "OpenCode Go": "OpenCode Go",
         "Hello": "",
         "{protocol:?}": ""
     },
@@ -100376,8 +100657,8 @@
         "https://opencode.ai/zen": "",
         "schemars": "",
         "snake_case": "",
-        "Zen": "",
-        "Go": "",
+        "Zen": "Zen",
+        "Go": "前往",
         "zen": "",
         "go": "",
         "": "",
@@ -100388,7 +100669,7 @@
         "Authorization": "",
         "Bearer {api_key}": "",
         "data: ": "",
-        "OpenCode": "",
+        "OpenCode": "OpenCode",
         "error during streamGenerateContent via OpenCode, status code: {:?}, body: {}": "通过 OpenCode 执行 streamGenerateContent 时出错,状态码:{:?},响应体:{}"
     },
     "zed/crates/path/src/abs_path.rs": {
@@ -100761,7 +101042,37 @@
         "a/b/c.rs": "",
         "file.txt": "",
         "md": "",
-        "file.md": ""
+        "file.md": "",
+        "A": "",
+        "ab": "",
+        "a b": "",
+        "a-b": "",
+        "a.b": "",
+        "a!": "",
+        "a~": "",
+        "a\\0": "",
+        "a\\0b": "",
+        "ä": "",
+        "a/b.c": "",
+        "a/bc": "",
+        "a.b/c": "",
+        "a-b/c": "",
+        "a b/c": "",
+        "ab/c": "",
+        "a/b/c/d": "",
+        "a/ä": "",
+        "a/\\0b": "",
+        "\\0a/b": "",
+        "\\0a/\\0b/c": "",
+        "日本/語": "",
+        "x/a.b/c": "",
+        "x/a/b": "",
+        "abcdefghijklmn/": "",
+        "abcdefghijklmno/": "",
+        "abcdefghijklmnopqrstuvwxyz01234/": "",
+        "{prefix}{a}": "",
+        "{prefix}{b}": "",
+        "{a:?} vs {b:?}": ""
     },
     "zed/crates/path/src/windows_prefix.rs": {
         "\\\\": "",
@@ -107728,7 +108039,7 @@
         "": "",
         "context-menu-preview": "",
         "preview": "",
-        "menu trigger": "",
+        "menu trigger": "菜单触发器",
         "{}": "",
         "{} changes": "{} 处更改"
     },
