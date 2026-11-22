@@ -199,6 +199,9 @@ jobs:
       - name: 校验保护规则与响应解析
         run: python3 test_zedl10n.py
 
+      - name: 校验 Windows 安装包配置
+        run: python3 test_packaging.py
+
       - name: 从 i18n 分支获取翻译文件和禁止翻译列表
         id: get_trans
         run: |
