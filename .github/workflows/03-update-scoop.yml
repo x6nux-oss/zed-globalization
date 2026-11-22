@@ -42,9 +42,12 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'release'
     steps:
+      - uses: actions/checkout@v4
+
       - name: 生成并推送 Manifest
         env:
           GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.version_tag }}
           INPUT_MODE: ${{ inputs.mode }}
@@ -55,27 +58,43 @@ jobs:
           SCOOP_PAT: ${{ secrets.TAP_GITHUB_TOKEN }}
         run: |
           set -e
+          source scripts/lib/github.sh
           BUCKET_REPO="https://x-access-token:${SCOOP_PAT}@github.com/x6nux-oss/scoop-zedg.git"
 
           # ── 等待并获取 Windows 产物 URL ────────────────────────────
+          # 走 gh_api（认证 + 指数退避重试 + 限流识别），并在 jq 取值前校验
+          # .assets 是数组，避免 API 返回错误 JSON 时出现 Cannot iterate over null
           fetch_assets() {
+            # 外层已有 20 次轮询，这里的单次请求不必再重试 5 轮（避免放大请求量）
+            local GH_API_MAX_ATTEMPTS=2
             local tag="$1" i json
+            # 显式初始化：未匹配到产物时保持确定的空值
+            ASSET_X64=""
+            ASSET_ARM64=""
             for i in $(seq 1 20); do
-              json=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/tags/$tag")
-              ASSET_X64=$(echo "$json" | jq -r '.assets[]|select(.name|test("windows-x86_64.*\\.zip"))|.browser_download_url')
-              ASSET_ARM64=$(echo "$json" | jq -r '.assets[]|select(.name|test("windows-aarch64.*\\.zip"))|.browser_download_url')
-              [ -n "$ASSET_X64" ] && [ "$ASSET_X64" != "null" ] && return 0
+              if json=$(gh_api "repos/${GH_REPO}/releases/tags/${tag}") \
+                 && require_json "$json" '.assets | type == "array"' "${tag} 的 release 响应"; then
+                ASSET_X64=$(printf '%s' "$json" | jq -r '[ (.assets // [])[] | select(.name|test("windows-x86_64.*\\.zip")) | .browser_download_url ][0] // empty')
+                ASSET_ARM64=$(printf '%s' "$json" | jq -r '[ (.assets // [])[] | select(.name|test("windows-aarch64.*\\.zip")) | .browser_download_url ][0] // empty')
+                if [ -n "$ASSET_X64" ]; then return 0; fi
+              fi
               echo "[$i/20] $tag 产物未就绪，等待 15s..."; sleep 15
             done
-            echo "::error::未找到 $tag 的 Windows x64 产物"; return 1
+            echo "::error::未找到 $tag 的 Windows x64 产物（已轮询 20 次）"; return 1
           }
 
           # ── 计算远程文件 SHA256 ────────────────────────────────────
+          # --fail：4xx/5xx 时不要拿错误页去算 hash；--retry 处理瞬时断连
           remote_sha256() {
             local tmp; tmp=$(mktemp)
-            curl -sL -o "$tmp" "$1"
+            if ! curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused -o "$tmp" "$1"; then
+              echo "::error::下载失败: $1" >&2; rm -f "$tmp"; return 1
+            fi
+            if [ ! -s "$tmp" ]; then
+              echo "::error::下载内容为空: $1" >&2; rm -f "$tmp"; return 1
+            fi
             sha256sum "$tmp" | awk '{print $1}'
-            rm "$tmp"
+            rm -f "$tmp"
           }
 
           # ── 生成单个 manifest ──────────────────────────────────────
@@ -166,10 +185,22 @@ jobs:
 
           mkdir -p /tmp/manifests
 
+          # ── 取最新稳定版 tag（结构校验后再取值）─────────────────────
+          latest_stable_tag() {
+            local json
+            json=$(gh_api "repos/${GH_REPO}/releases/latest") || {
+              echo "::error::获取 ${GH_REPO} 最新 release 失败" >&2; return 1; }
+            require_json "$json" '.tag_name | type == "string" and length > 0' \
+              "releases/latest 响应" || return 1
+            printf '%s' "$json" | jq -r '.tag_name'
+          }
+
           if [ "$MODE" = "both" ]; then
-            STABLE_TAG=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
-            PRE_TAG=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases?per_page=20" \
-              | jq -r '[.[]|select(.prerelease)][0].tag_name // empty')
+            STABLE_TAG=$(latest_stable_tag) || exit 1
+            LIST_JSON=$(gh_api "repos/${GH_REPO}/releases?per_page=20") || {
+              echo "::error::获取 ${GH_REPO} release 列表失败"; exit 1; }
+            require_json "$LIST_JSON" 'type == "array"' "releases 列表响应" || exit 1
+            PRE_TAG=$(printf '%s' "$LIST_JSON" | jq -r '[.[]|select(.prerelease)][0].tag_name // empty')
             echo "both 模式：stable=$STABLE_TAG  prerelease=${PRE_TAG:-（无）}"
             make_manifest "$STABLE_TAG" "false" /tmp/manifests/zedg.json
             [ -n "$PRE_TAG" ] && make_manifest "$PRE_TAG" "true" /tmp/manifests/zedg-preview.json
@@ -183,11 +214,14 @@ jobs:
               if [ -n "$INPUT_IS_PRE" ] && [ "$INPUT_IS_PRE" != "false" ]; then
                 IS_PRE="$INPUT_IS_PRE"
               else
-                IS_PRE=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/tags/$TARGET_TAG" \
-                  | jq -r '.prerelease // false')
+                REL_JSON=$(gh_api "repos/${GH_REPO}/releases/tags/${TARGET_TAG}") || {
+                  echo "::error::获取 ${TARGET_TAG} 的 release 信息失败"; exit 1; }
+                require_json "$REL_JSON" 'type == "object" and has("prerelease")' \
+                  "${TARGET_TAG} 的 release 响应" || exit 1
+                IS_PRE=$(printf '%s' "$REL_JSON" | jq -r '.prerelease // false')
               fi
             elif [ -z "$TARGET_TAG" ]; then
-              TARGET_TAG=$(curl -s "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
+              TARGET_TAG=$(latest_stable_tag) || exit 1
               IS_PRE="false"
             fi
             [ "$MODE" = "stable" ]     && IS_PRE="false"

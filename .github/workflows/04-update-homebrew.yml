@@ -35,8 +35,13 @@ jobs:
       github.event_name == 'release' ||
       github.event.workflow_run.conclusion == 'success'
     steps:
+      - uses: actions/checkout@v4
+
       - name: 确定目标版本号
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          source scripts/lib/github.sh
           if [ -n "${{ inputs.version_tag }}" ]; then
             echo "手动指定版本: ${{ inputs.version_tag }}"
             echo "TARGET_TAG=${{ inputs.version_tag }}" >> $GITHUB_ENV
@@ -44,50 +49,86 @@ jobs:
             echo "Release 事件: ${{ github.event.release.tag_name }}"
             echo "TARGET_TAG=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
           else
-            TAG=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
+            LATEST_JSON=$(gh_api "repos/${{ github.repository }}/releases/latest") || {
+              echo "::error::获取最新 release 失败，无法确定目标版本"; exit 1; }
+            require_json "$LATEST_JSON" '.tag_name | type == "string" and length > 0' \
+              "releases/latest 响应" || exit 1
+            TAG=$(printf '%s' "$LATEST_JSON" | jq -r '.tag_name')
             echo "自动获取最新: $TAG"
             echo "TARGET_TAG=$TAG" >> $GITHUB_ENV
           fi
 
       - name: 判断是否为 Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          source scripts/lib/github.sh
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             IS_PRE="${{ inputs.is_prerelease }}"
           elif [ "${{ github.event_name }}" = "release" ]; then
             IS_PRE="${{ github.event.release.prerelease }}"
           else
-            IS_PRE=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TARGET_TAG" | jq -r '.prerelease // false')
+            REL_JSON=$(gh_api "repos/${{ github.repository }}/releases/tags/${TARGET_TAG}") || {
+              echo "::error::获取 ${TARGET_TAG} 的 release 信息失败"; exit 1; }
+            require_json "$REL_JSON" 'type == "object" and has("prerelease")' \
+              "${TARGET_TAG} 的 release 响应" || exit 1
+            IS_PRE=$(printf '%s' "$REL_JSON" | jq -r '.prerelease // false')
           fi
           echo "IS_PRERELEASE=$IS_PRE" >> $GITHUB_ENV
           echo "Pre-release: $IS_PRE"
 
       - name: 等待并获取 macOS 产物信息
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          source scripts/lib/github.sh
+          # 外层已有 20 次轮询，单次请求只重试 2 轮，避免放大请求量
+          GH_API_MAX_ATTEMPTS=2
           TAG="$TARGET_TAG"
+          URL_ARM=""
+          URL_X86=""
+          LAST_API_OK="false"
           for i in $(seq 1 20); do
-            RELEASE_JSON=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
-            URL_ARM=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("macos-aarch64.*\\.dmg")) | .browser_download_url' | head -1)
-            URL_X86=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("macos-x86_64.*\\.dmg")) | .browser_download_url' | head -1)
-            if [ -n "$URL_ARM" ] && [ "$URL_ARM" != "null" ] && \
-               [ -n "$URL_X86" ] && [ "$URL_X86" != "null" ]; then
-              echo "aarch64: $URL_ARM"
-              echo "x86_64:  $URL_X86"
-              echo "ASSET_URL_ARM=$URL_ARM" >> $GITHUB_ENV
-              echo "ASSET_URL_X86=$URL_X86" >> $GITHUB_ENV
-              break
+            RELEASE_JSON=""
+            if RELEASE_JSON=$(gh_api "repos/${{ github.repository }}/releases/tags/${TAG}") \
+               && require_json "$RELEASE_JSON" '.assets | type == "array"' "${TAG} 的 release 响应"; then
+              LAST_API_OK="true"
+              URL_ARM=$(printf '%s' "$RELEASE_JSON" | jq -r '[ (.assets // [])[] | select(.name | test("macos-aarch64.*\\.dmg")) | .browser_download_url ][0] // empty')
+              URL_X86=$(printf '%s' "$RELEASE_JSON" | jq -r '[ (.assets // [])[] | select(.name | test("macos-x86_64.*\\.dmg")) | .browser_download_url ][0] // empty')
+              if [ -n "$URL_ARM" ] && [ -n "$URL_X86" ]; then
+                echo "aarch64: $URL_ARM"
+                echo "x86_64:  $URL_X86"
+                echo "ASSET_URL_ARM=$URL_ARM" >> $GITHUB_ENV
+                echo "ASSET_URL_X86=$URL_X86" >> $GITHUB_ENV
+                break
+              fi
+            else
+              LAST_API_OK="false"
             fi
             echo "[$i/20] 产物未就绪，等待 15s..."
             sleep 15
           done
-          if [ -z "$URL_ARM" ] || [ "$URL_ARM" = "null" ]; then
-            echo "::error::未找到 macOS 分架构 DMG 产物"
+          if [ -z "$URL_ARM" ] || [ -z "$URL_X86" ]; then
+            # 区分「API 一直失败」与「API 正常但产物缺失」，避免误诊
+            if [ "$LAST_API_OK" != "true" ]; then
+              echo "::error::无法获取 ${TAG} 的 release 信息（GitHub API 持续失败），因此未能确认 macOS 分架构 DMG 产物"
+            else
+              echo "::error::${TAG} 的 release 可访问，但缺少 macOS aarch64 / x86_64 DMG 产物（已轮询 20 次）"
+            fi
             exit 1
           fi
 
       - name: 下载并计算 Hash
         run: |
-          curl -L -o zedg-aarch64.dmg "$ASSET_URL_ARM"
-          curl -L -o zedg-x86_64.dmg  "$ASSET_URL_X86"
+          # --fail：产物 URL 返回 4xx/5xx 时不要拿错误页算 hash
+          curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused -o zedg-aarch64.dmg "$ASSET_URL_ARM"
+          curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused -o zedg-x86_64.dmg  "$ASSET_URL_X86"
+          for f in zedg-aarch64.dmg zedg-x86_64.dmg; do
+            if [ ! -s "$f" ]; then
+              echo "::error::下载内容为空: $f"
+              exit 1
+            fi
+          done
           SHA256_ARM=$(sha256sum zedg-aarch64.dmg | awk '{print $1}')
           SHA256_X86=$(sha256sum zedg-x86_64.dmg  | awk '{print $1}')
           echo "SHA256_ARM=$SHA256_ARM" >> $GITHUB_ENV
