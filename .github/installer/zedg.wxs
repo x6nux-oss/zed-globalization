@@ -7,14 +7,17 @@
            Manufacturer="zed-globalization"
            UpgradeCode="$(var.UpgradeCode)">
 
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <!-- 当前用户安装：%LOCALAPPDATA%\Programs\ZedG，按默认值安装不需要管理员权限 -->
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of ZedG is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLFOLDER" Name="ZedG">
-          <Directory Id="BinFolder" Name="bin" />
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLFOLDER" Name="ZedG">
+            <Directory Id="BinFolder" Name="bin" />
+          </Directory>
         </Directory>
       </Directory>
       <Directory Id="ProgramMenuFolder">

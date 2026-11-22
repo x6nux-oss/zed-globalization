@@ -9,6 +9,10 @@
 
 !define APP_NAME      "ZedG"
 !define APP_PUBLISHER "zed-globalization"
+; 旧测试版 (产品名/目录 zedg-test) 的识别常量。仅用于升级兼容, 不是默认值;
+; 全新安装一律使用下面的 InstallDir ($LOCALAPPDATA\Programs\ZedG)。
+!define LEGACY_APP_NAME    "zedg-test"
+!define LEGACY_DEFAULT_DIR "D:\zedg-test"
 !define OFFICIAL_DIR  "$LOCALAPPDATA\Programs\Zed"
 !define OFFICIAL_EXE  "${OFFICIAL_DIR}\zed.exe"
 !define BAK_FILE      "${OFFICIAL_DIR}\zed.exe.official.bak"
@@ -22,7 +26,9 @@ Unicode true
 
 Name "${APP_NAME}"
 OutFile "..\zedg-setup.exe"
+; 默认安装目录: 当前用户 LocalAppData (VS Code / Discord 同款), 按默认值安装不需要管理员
 InstallDir "$LOCALAPPDATA\Programs\ZedG"
+; 已安装过的机器沿用注册表里记录的目录 (含用户自定义路径 / 旧测试版目录), 覆盖默认值
 InstallDirRegKey HKCU "Software\${APP_NAME}" "InstallDir"
 RequestExecutionLevel user
 
@@ -69,6 +75,27 @@ Section "${APP_NAME} 主程序 (必需)" SEC_MAIN
     "DisplayIcon" "$INSTDIR\ZedG.exe"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" \
     "EstimatedSize" 0x018000
+
+  ; 旧测试版升级: 由本安装接管, 迁移"覆盖官方 Zed"状态并移除旧卸载项,
+  ; 避免"设置 → 应用"里出现两个 ZedG, 同时保证卸载时仍能还原官方 zed.exe。
+  ReadRegStr $0 HKCU "Software\${LEGACY_APP_NAME}" "InstallDir"
+  StrCmp $0 "$INSTDIR" 0 legacy_reg_check_default
+  Goto legacy_reg_takeover
+
+  legacy_reg_check_default:
+    ; 没有旧注册表记录、但安装到了旧测试版默认目录 (例如全新安装前手动放过去的)
+    StrCmp $INSTDIR "${LEGACY_DEFAULT_DIR}" 0 legacy_reg_done
+
+  legacy_reg_takeover:
+    ReadRegStr $0 HKCU "Software\${LEGACY_APP_NAME}" "OverrideOfficial"
+    StrCmp $0 "1" 0 legacy_reg_no_override
+      IfFileExists "${BAK_FILE}" 0 legacy_reg_no_override
+      WriteRegStr HKCU "Software\${APP_NAME}" "OverrideOfficial" "1"
+    legacy_reg_no_override:
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_APP_NAME}"
+    DeleteRegKey HKCU "Software\${LEGACY_APP_NAME}"
+
+  legacy_reg_done:
 
   ; 卸载器
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -124,8 +151,32 @@ SectionEnd
 ; --- 覆盖与 PATH 的选择状态管理 ---
 Var OverrideSelected
 
+; ---------------------------------------------------------------------------
+; 旧测试版安装目录兼容 (升级/卸载仍识别 D:\zedg-test)
+; 只影响机器上已存在旧安装的场景; 全新安装默认仍是 $LOCALAPPDATA\Programs\ZedG。
+; 优先级: 本产品注册表 > 旧测试版注册表 > 旧测试版默认目录。
+; ---------------------------------------------------------------------------
 Function .onInit
   StrCpy $OverrideSelected "0"
+
+  ; 1) 已安装过 ZedG: InstallDirRegKey 已把 $INSTDIR 指向原目录, 保持不变
+  ReadRegStr $0 HKCU "Software\${APP_NAME}" "InstallDir"
+  StrCmp $0 "" 0 legacy_dir_done
+
+  ; 2) 旧测试版的注册表记录
+  ReadRegStr $0 HKCU "Software\${LEGACY_APP_NAME}" "InstallDir"
+  StrCmp $0 "" 0 legacy_dir_verify
+
+  ; 3) 旧测试版的默认目录 (必须确实是一次安装: 有卸载器)
+  IfFileExists "${LEGACY_DEFAULT_DIR}\Uninstall.exe" 0 legacy_dir_done
+  StrCpy $0 "${LEGACY_DEFAULT_DIR}"
+
+  legacy_dir_verify:
+    ; 目录已不存在 (例如 D 盘被移除) 时回落到新的默认目录
+    IfFileExists "$0\*.*" 0 legacy_dir_done
+    StrCpy $INSTDIR $0
+
+  legacy_dir_done:
 FunctionEnd
 
 Function .onSelChange
@@ -176,6 +227,20 @@ Section "Uninstall"
   RMDir "$INSTDIR"
 
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
+
+  ; 旧测试版: 若本次安装就在旧目录, 一并清掉旧测试版的卸载项/注册项
+  ReadRegStr $0 HKCU "Software\${LEGACY_APP_NAME}" "InstallDir"
+  StrCmp $0 "$INSTDIR" 0 legacy_uninst_check_default
+  Goto legacy_uninst_cleanup
+
+  legacy_uninst_check_default:
+    StrCmp $INSTDIR "${LEGACY_DEFAULT_DIR}" 0 legacy_uninst_done
+
+  legacy_uninst_cleanup:
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${LEGACY_APP_NAME}"
+    DeleteRegKey /ifempty HKCU "Software\${LEGACY_APP_NAME}"
+
+  legacy_uninst_done:
   DeleteRegKey /ifempty HKCU "Software\${APP_NAME}"
 SectionEnd
 
