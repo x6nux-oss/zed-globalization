@@ -117,26 +117,28 @@ def _build_project_header(
 
 
 def fetch_release_notes(version: str) -> str:
-    """从 GitHub API 获取 Zed 指定版本的 Release Notes"""
-    import urllib.request
+    """从 GitHub API 获取 Zed 指定版本的 Release Notes
 
-    urls = [
-        f"https://api.github.com/repos/zed-industries/zed/releases/tags/{version}",
-        "https://api.github.com/repos/zed-industries/zed/releases/latest",
+    统一走 :mod:`zedl10n.github_api`：认证 + 指数退避重试（含限流识别），
+    并对空响应 / 非对象 JSON 做显式防御。取不到时返回空串，由调用方降级。
+    """
+    from .github_api import GitHubAPIError, request_json
+
+    targets = [
+        f"repos/zed-industries/zed/releases/tags/{version}",
+        "repos/zed-industries/zed/releases/latest",
     ]
-    for url in urls:
+    for target in targets:
         try:
-            req = urllib.request.Request(
-                url, headers={"Accept": "application/vnd.github+json"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read())
-                body = data.get("body", "")
-                if body:
-                    log.info("获取到 Release Notes (来源: %s)", url)
-                    return body
-        except Exception as e:
-            log.debug("请求失败 %s: %s", url, e)
+            data = request_json(target, expect=dict)
+        except GitHubAPIError as e:
+            log.warning("获取 Release Notes 失败 (%s): %s", target, e)
+            continue
+        body = data.get("body")
+        if isinstance(body, str) and body.strip():
+            log.info("获取到 Release Notes (来源: %s)", target)
+            return body
+        log.warning("Release Notes 为空: %s", target)
     return ""
 
 

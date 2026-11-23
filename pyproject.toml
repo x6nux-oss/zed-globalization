@@ -11,6 +11,8 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
+    # GitHub REST API 统一封装（认证 + 重试 + 空响应防御）
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
