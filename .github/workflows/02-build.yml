@@ -354,6 +354,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path D:\c
           New-Item -ItemType Directory -Force -Path D:\c\sccache
           New-Item -ItemType Directory -Force -Path D:\temp
+          # 目标目录挪到 D:\t：cargo 为每个 build script crate 传一条
+          # -L dependency=<target>\release\build\<crate>\<hash>\out（本仓库约 385 条），
+          # D:\z\target 换成 D:\t 让 rustc 命令行整体缩短约 2.7k 字符，
+          # 远离 Windows 32767 上限（sccache 报 os error 206）。
+          New-Item -ItemType Directory -Force -Path D:\t
+          echo "CARGO_TARGET_DIR=D:\t" >> $env:GITHUB_ENV
           echo "CARGO_HOME=D:\c" >> $env:GITHUB_ENV
           echo "TEMP=D:\temp" >> $env:GITHUB_ENV
           echo "TMP=D:\temp" >> $env:GITHUB_ENV
@@ -640,8 +646,8 @@ jobs:
         run: |
           mkdir zed-dist
           mkdir zed-dist\bin
-          Copy-Item "D:\z\target\release\zed.exe" zed-dist\ZedG.exe
-          Copy-Item "D:\z\target\release\cli.exe" zed-dist\bin\ZedG.exe
+          Copy-Item "D:\t\release\zed.exe" zed-dist\ZedG.exe
+          Copy-Item "D:\t\release\cli.exe" zed-dist\bin\ZedG.exe
           Compress-Archive -Path zed-dist\* -DestinationPath "zedg-$env:LANG_LOWER-windows-x86_64-$env:BUILD_VERSION.zip"
 
       # issue #37 / 安装包需求: NSIS 安装向导（可选组件里提供"覆盖官方 Zed"）
@@ -707,6 +713,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path C:\cc
           New-Item -ItemType Directory -Force -Path C:\cc\sccache
           New-Item -ItemType Directory -Force -Path C:\temp
+          # 同 x64 job：缩短 -L dependency= 路径，避开 Windows 32767 命令行上限
+          New-Item -ItemType Directory -Force -Path C:\t
+          echo "CARGO_TARGET_DIR=C:\t" >> $env:GITHUB_ENV
           echo "CARGO_HOME=C:\cc" >> $env:GITHUB_ENV
           echo "TEMP=C:\temp" >> $env:GITHUB_ENV
           echo "TMP=C:\temp" >> $env:GITHUB_ENV
@@ -997,8 +1006,8 @@ jobs:
         run: |
           mkdir zed-dist
           mkdir zed-dist\bin
-          Copy-Item "C:\z\target\release\zed.exe" zed-dist\ZedG.exe
-          Copy-Item "C:\z\target\release\cli.exe" zed-dist\bin\ZedG.exe
+          Copy-Item "C:\t\release\zed.exe" zed-dist\ZedG.exe
+          Copy-Item "C:\t\release\cli.exe" zed-dist\bin\ZedG.exe
           Compress-Archive -Path zed-dist\* -DestinationPath "zedg-$env:LANG_LOWER-windows-aarch64-$env:BUILD_VERSION.zip"
 
       - name: 安装 NSIS
