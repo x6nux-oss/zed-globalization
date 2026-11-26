@@ -50,7 +50,9 @@ concurrency:
 env:
   ZED_REPO: https://github.com/zed-industries/zed.git
   # === 加速配置 ===
-  RUSTC_WRAPPER: "sccache"
+  # RUSTC_WRAPPER 不设全局默认：Windows 各 job 在「安装 sccache」里按版本断言
+  # 写入（>=0.20.0 才设，否则置空让 cargo 走 @argfile 兜底），Linux/macOS job
+  # 自己在构建步骤里 export。
   CARGO_INCREMENTAL: "0"
   SCCACHE_RECACHE_THIRD_PARTY_DEPS: "1"
   # 10G 时缓存顶满上限，恢复阶段要下载+解压约 11GB，叠加 release target
@@ -390,59 +392,69 @@ jobs:
 
       - name: 安装 sccache
         shell: pwsh
+        env:
+          # 固定 tag，不用 releases/latest：修复的前提是版本可预期。
+          # sccache 0.17–0.19 会先展开 @file 再自行 spawn，废掉 cargo 的长命令行
+          # 兜底（mozilla/sccache#2787；修复见 #3026，随 v0.20.0 发布）。
+          # choco 目前最高 0.19.0，早于修复，所以 GitHub Releases 是首选、choco 只兜底。
+          SCCACHE_TAG: v0.20.1
         run: |
-          $installed = $false
+          $minVersion = [version]"0.20.0"
+          $target = "x86_64-pc-windows-msvc"
+          $zipPath = "D:\temp\sccache.zip"
+          $binDir  = "D:\temp\sccache-bin"
+          $sccacheExe = $null
 
-          # 方案1: choco 安装（最多重试 3 次）
-          for ($i = 1; $i -le 3; $i++) {
-            Write-Host "Chocolatey 安装 sccache 尝试 $i/3..."
-            choco install sccache -y --no-progress 2>&1
-            if ($LASTEXITCODE -eq 0 -and (Get-Command sccache -ErrorAction SilentlyContinue)) {
-              Write-Host "choco 安装成功"
-              $installed = $true
-              break
-            }
-            Write-Host "第 $i 次安装失败 (exit=$LASTEXITCODE)"
-            if ($i -lt 3) { Write-Host "等待 30 秒后重试..."; Start-Sleep -Seconds 30 }
+          function Get-SccacheVersion([string]$exe) {
+            try { $out = (& $exe --version 2>&1 | Out-String).Trim() } catch { return $null }
+            if ($out -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
+            return $null
           }
 
-          # 方案2: 直接从 GitHub Releases 下载
-          if (-not $installed) {
-            Write-Host "choco 安装失败，尝试从 GitHub Releases 直接下载..."
+          # 方案1: 固定 tag 从 GitHub Releases 下载
+          $url = "https://github.com/mozilla/sccache/releases/download/$($env:SCCACHE_TAG)/sccache-$($env:SCCACHE_TAG)-$target.zip"
+          for ($i = 1; $i -le 3; $i++) {
             try {
-              $release = Invoke-RestMethod "https://api.github.com/repos/mozilla/sccache/releases/latest"
-              $asset = $release.assets | Where-Object {
-                $_.name -match "x86_64-pc-windows-msvc" -and $_.name -match "\.zip$"
-              } | Select-Object -First 1
-              if ($asset) {
-                Write-Host "下载: $($asset.browser_download_url)"
-                $zipPath = "D:\temp\sccache.zip"
-                $binDir  = "D:\temp\sccache-bin"
-                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
-                Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
-                $sccacheExe = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
-                if ($sccacheExe) {
-                  echo "$($sccacheExe.DirectoryName)" >> $env:GITHUB_PATH
-                  & "$($sccacheExe.FullName)" --version
-                  if ($LASTEXITCODE -eq 0) {
-                    Write-Host "GitHub Releases 安装成功"
-                    $installed = $true
-                  }
-                }
-              } else {
-                Write-Host "未找到 Windows x86_64 资产"
+              Write-Host "下载 sccache $($env:SCCACHE_TAG) 尝试 $i/3: $url"
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+              Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+              $candidate = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
+              if ($candidate) {
+                $ver = Get-SccacheVersion $candidate.FullName
+                Write-Host "GitHub Releases sccache 版本: $ver"
+                if ($ver -and $ver -ge $minVersion) { $sccacheExe = $candidate.FullName; break }
+                Write-Host "版本 $ver 低于 $minVersion，弃用"
               }
             } catch {
-              Write-Host "GitHub Releases 下载失败: $_"
+              Write-Host "下载失败: $_"
+            }
+            if ($i -lt 3) { Write-Host "等待 20 秒后重试..."; Start-Sleep -Seconds 20 }
+          }
+
+          # 方案2: choco 兜底，同样必须过版本断言
+          if (-not $sccacheExe -and (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Host "GitHub Releases 不可用，尝试 choco 兜底..."
+            choco install sccache -y --no-progress 2>&1
+            $cmd = Get-Command sccache -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $ver = Get-SccacheVersion $cmd.Source
+              Write-Host "choco sccache 版本: $ver"
+              if ($ver -and $ver -ge $minVersion) { $sccacheExe = $cmd.Source }
+              else { Write-Host "choco 版本 $ver 低于 $minVersion，不可用" }
             }
           }
 
-          if ($installed) {
+          # 包装器开关只在这里决定：版本满足才设 sccache，否则置空，
+          # 让 cargo 自己的 @argfile 兜底生效（宁可无缓存也不要构建失败）。
+          if ($sccacheExe) {
+            echo "$(Split-Path $sccacheExe)" >> $env:GITHUB_PATH
             echo "SCCACHE_AVAILABLE=true" >> $env:GITHUB_ENV
-            Write-Host "✓ sccache 可用，将启用编译缓存"
+            echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+            Write-Host "✓ sccache $(Get-SccacheVersion $sccacheExe) ≥ $minVersion，启用编译缓存（$sccacheExe）"
           } else {
             echo "SCCACHE_AVAILABLE=false" >> $env:GITHUB_ENV
-            Write-Host "⚠ sccache 所有安装方式均失败，将不使用编译缓存"
+            echo "RUSTC_WRAPPER=" >> $env:GITHUB_ENV
+            Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
           }
 
       - name: 从 Artifact 恢复 sccache 缓存
@@ -499,13 +511,11 @@ jobs:
         env:
           RELEASE_CHANNEL: stable
         run: |
-          # 根据 sccache 可用性决定是否启用缓存
-          if ($env:SCCACHE_AVAILABLE -eq "true") {
-            $env:RUSTC_WRAPPER = "sccache"
-            Write-Host "已启用 sccache 编译缓存"
-          } else {
-            $env:RUSTC_WRAPPER = ""
-            Write-Host "⚠ sccache 不可用，直接编译（无缓存加速）"
+          # RUSTC_WRAPPER 由「安装 sccache」按版本断言写入 GITHUB_ENV，这里只回报实际值
+          Write-Host "sccache: $(if (Get-Command sccache -ErrorAction SilentlyContinue) { sccache --version } else { '未安装' })"
+          Write-Host "RUSTC_WRAPPER='$env:RUSTC_WRAPPER'  SCCACHE_AVAILABLE='$env:SCCACHE_AVAILABLE'"
+          if ($env:SCCACHE_AVAILABLE -eq "true" -and $env:RUSTC_WRAPPER -ne "sccache") {
+            Write-Host "::warning::SCCACHE_AVAILABLE=true 但 RUSTC_WRAPPER='$env:RUSTC_WRAPPER'，实际未启用缓存"
           }
 
           # 启动内存监控后台任务
@@ -750,61 +760,68 @@ jobs:
 
       - name: 安装 sccache
         shell: pwsh
+        env:
+          # 同 x64 job：固定 tag，不用 releases/latest。sccache < 0.20.0 会展开
+          # @file 再自行 spawn（mozilla/sccache#2787，修复见 #3026 / v0.20.0），
+          # 长命令行下报 os error 206；choco 目前最高 0.19.0，只能兜底。
+          SCCACHE_TAG: v0.20.1
         run: |
-          $installed = $false
+          $minVersion = [version]"0.20.0"
+          $target = "aarch64-pc-windows-msvc"
+          $zipPath = "C:\temp\sccache.zip"
+          $binDir  = "C:\temp\sccache-bin"
+          $sccacheExe = $null
 
-          # 方案1: choco 安装（最多重试 3 次）
-          if (Get-Command choco -ErrorAction SilentlyContinue) {
-            for ($i = 1; $i -le 3; $i++) {
-              Write-Host "Chocolatey 安装 sccache 尝试 $i/3..."
-              choco install sccache -y --no-progress 2>&1
-              if ($LASTEXITCODE -eq 0 -and (Get-Command sccache -ErrorAction SilentlyContinue)) {
-                Write-Host "choco 安装成功"
-                $installed = $true
-                break
-              }
-              Write-Host "第 $i 次安装失败 (exit=$LASTEXITCODE)"
-              if ($i -lt 3) { Write-Host "等待 30 秒后重试..."; Start-Sleep -Seconds 30 }
-            }
+          function Get-SccacheVersion([string]$exe) {
+            try { $out = (& $exe --version 2>&1 | Out-String).Trim() } catch { return $null }
+            if ($out -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
+            return $null
           }
 
-          # 方案2: 直接从 GitHub Releases 下载 ARM64 版本
-          if (-not $installed) {
-            Write-Host "尝试从 GitHub Releases 直接下载 ARM64 版本..."
+          # 方案1: 固定 tag 从 GitHub Releases 下载 ARM64 版本
+          $url = "https://github.com/mozilla/sccache/releases/download/$($env:SCCACHE_TAG)/sccache-$($env:SCCACHE_TAG)-$target.zip"
+          for ($i = 1; $i -le 3; $i++) {
             try {
-              $release = Invoke-RestMethod "https://api.github.com/repos/mozilla/sccache/releases/latest"
-              $asset = $release.assets | Where-Object {
-                $_.name -match "aarch64-pc-windows-msvc" -and $_.name -match "\.zip$"
-              } | Select-Object -First 1
-              if ($asset) {
-                Write-Host "下载: $($asset.browser_download_url)"
-                $zipPath = "C:\temp\sccache.zip"
-                $binDir  = "C:\temp\sccache-bin"
-                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
-                Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
-                $sccacheExe = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
-                if ($sccacheExe) {
-                  echo "$($sccacheExe.DirectoryName)" >> $env:GITHUB_PATH
-                  & "$($sccacheExe.FullName)" --version
-                  if ($LASTEXITCODE -eq 0) {
-                    Write-Host "GitHub Releases 安装成功"
-                    $installed = $true
-                  }
-                }
-              } else {
-                Write-Host "未找到 Windows ARM64 资产"
+              Write-Host "下载 sccache $($env:SCCACHE_TAG) 尝试 $i/3: $url"
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+              Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+              $candidate = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
+              if ($candidate) {
+                $ver = Get-SccacheVersion $candidate.FullName
+                Write-Host "GitHub Releases sccache 版本: $ver"
+                if ($ver -and $ver -ge $minVersion) { $sccacheExe = $candidate.FullName; break }
+                Write-Host "版本 $ver 低于 $minVersion，弃用"
               }
             } catch {
-              Write-Host "GitHub Releases 下载失败: $_"
+              Write-Host "下载失败: $_"
+            }
+            if ($i -lt 3) { Write-Host "等待 20 秒后重试..."; Start-Sleep -Seconds 20 }
+          }
+
+          # 方案2: choco 兜底，同样必须过版本断言
+          if (-not $sccacheExe -and (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Host "GitHub Releases 不可用，尝试 choco 兜底..."
+            choco install sccache -y --no-progress 2>&1
+            $cmd = Get-Command sccache -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $ver = Get-SccacheVersion $cmd.Source
+              Write-Host "choco sccache 版本: $ver"
+              if ($ver -and $ver -ge $minVersion) { $sccacheExe = $cmd.Source }
+              else { Write-Host "choco 版本 $ver 低于 $minVersion，不可用" }
             }
           }
 
-          if ($installed) {
+          # 包装器开关只在这里决定：版本满足才设 sccache，否则置空，
+          # 让 cargo 自己的 @argfile 兜底生效（宁可无缓存也不要构建失败）。
+          if ($sccacheExe) {
+            echo "$(Split-Path $sccacheExe)" >> $env:GITHUB_PATH
             echo "SCCACHE_AVAILABLE=true" >> $env:GITHUB_ENV
-            Write-Host "✓ sccache 可用，将启用编译缓存"
+            echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+            Write-Host "✓ sccache $(Get-SccacheVersion $sccacheExe) ≥ $minVersion，启用编译缓存（$sccacheExe）"
           } else {
             echo "SCCACHE_AVAILABLE=false" >> $env:GITHUB_ENV
-            Write-Host "⚠ sccache 所有安装方式均失败，将不使用编译缓存"
+            echo "RUSTC_WRAPPER=" >> $env:GITHUB_ENV
+            Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
           }
 
       - name: 从 Artifact 恢复 sccache 缓存
@@ -861,12 +878,11 @@ jobs:
         env:
           RELEASE_CHANNEL: stable
         run: |
-          if ($env:SCCACHE_AVAILABLE -eq "true") {
-            $env:RUSTC_WRAPPER = "sccache"
-            Write-Host "已启用 sccache 编译缓存"
-          } else {
-            $env:RUSTC_WRAPPER = ""
-            Write-Host "⚠ sccache 不可用，直接编译（无缓存加速）"
+          # RUSTC_WRAPPER 由「安装 sccache」按版本断言写入 GITHUB_ENV，这里只回报实际值
+          Write-Host "sccache: $(if (Get-Command sccache -ErrorAction SilentlyContinue) { sccache --version } else { '未安装' })"
+          Write-Host "RUSTC_WRAPPER='$env:RUSTC_WRAPPER'  SCCACHE_AVAILABLE='$env:SCCACHE_AVAILABLE'"
+          if ($env:SCCACHE_AVAILABLE -eq "true" -and $env:RUSTC_WRAPPER -ne "sccache") {
+            Write-Host "::warning::SCCACHE_AVAILABLE=true 但 RUSTC_WRAPPER='$env:RUSTC_WRAPPER'，实际未启用缓存"
           }
 
           $monitorJob = Start-Job -ScriptBlock {
