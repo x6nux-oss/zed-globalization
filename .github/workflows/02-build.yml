@@ -457,6 +457,11 @@ jobs:
             Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
           }
 
+          # 尽力安装：两条路径都已处理（启用或降级），显式清零退出码。
+          # 否则 choco/下载留下的非零 $LASTEXITCODE 会让 pwsh 包装器以它退出，
+          # step 判失败、后续 cargo 构建被跳过，无缓存兜底等于不生效。
+          exit 0
+
       - name: 从 Artifact 恢复 sccache 缓存
         if: env.SCCACHE_AVAILABLE == 'true'
         continue-on-error: true
@@ -823,6 +828,11 @@ jobs:
             echo "RUSTC_WRAPPER=" >> $env:GITHUB_ENV
             Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
           }
+
+          # 尽力安装：两条路径都已处理（启用或降级），显式清零退出码。
+          # 否则 choco/下载留下的非零 $LASTEXITCODE 会让 pwsh 包装器以它退出，
+          # step 判失败、后续 cargo 构建被跳过，无缓存兜底等于不生效。
+          exit 0
 
       - name: 从 Artifact 恢复 sccache 缓存
         if: env.SCCACHE_AVAILABLE == 'true'
