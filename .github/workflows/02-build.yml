@@ -282,8 +282,17 @@ jobs:
             libssl-dev libudev-dev libclang-dev clang cmake
 
       - name: 安装 Rust
-        if: ${{ inputs.skip_check != true }}
         uses: dtolnay/rust-toolchain@stable
+
+      - name: 同步 Cargo.lock
+        run: |
+          cd zed
+          # rebrand 给 crates/auto_update/Cargo.toml 补了 github_releases 依赖，
+          # Cargo.lock 必须跟着写回，否则下游 job 的 `cargo build --locked`
+          # 直接失败：cannot update the lock file ... because --locked was passed。
+          # 平时由下面的 `cargo check` 顺手完成；skip_check=true 时那步被跳过，
+          # 所以这里无条件补一次（只解析依赖，不编译）。
+          cargo metadata --format-version 1 > /dev/null
 
       - name: 编译检查
         if: ${{ inputs.skip_check != true }}
