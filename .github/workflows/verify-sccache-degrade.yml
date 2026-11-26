@@ -1,0 +1,413 @@
+name: verify-sccache-degrade
+on:
+  push:
+    branches: [verify/code-136-sccache-degrade]
+permissions:
+  contents: read
+jobs:
+
+  before-x64:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备临时目录
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "D:\temp" | Out-Null
+          Write-Host "runner=$env:RUNNER_OS/$env:RUNNER_ARCH  choco=$(if (Get-Command choco -ErrorAction SilentlyContinue) { 'yes' } else { 'no' })"
+
+      - name: 安装 sccache（旧实现·无 exit 0；Releases 404 + choco 装不存在的包）
+        shell: pwsh
+        env:
+          SCCACHE_TAG: v0.20.1-code136-missing
+        run: |
+          $minVersion = [version]"0.20.0"
+          $target = "x86_64-pc-windows-msvc"
+          $zipPath = "D:\temp\sccache.zip"
+          $binDir  = "D:\temp\sccache-bin"
+          $sccacheExe = $null
+
+          function Get-SccacheVersion([string]$exe) {
+            try { $out = (& $exe --version 2>&1 | Out-String).Trim() } catch { return $null }
+            if ($out -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
+            return $null
+          }
+
+          # 方案1: 固定 tag 从 GitHub Releases 下载
+          $url = "https://github.com/mozilla/sccache/releases/download/$($env:SCCACHE_TAG)/sccache-$($env:SCCACHE_TAG)-$target.zip"
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              Write-Host "下载 sccache $($env:SCCACHE_TAG) 尝试 $i/3: $url"
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+              Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+              $candidate = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
+              if ($candidate) {
+                $ver = Get-SccacheVersion $candidate.FullName
+                Write-Host "GitHub Releases sccache 版本: $ver"
+                if ($ver -and $ver -ge $minVersion) { $sccacheExe = $candidate.FullName; break }
+                Write-Host "版本 $ver 低于 $minVersion，弃用"
+              }
+            } catch {
+              Write-Host "下载失败: $_"
+            }
+            if ($i -lt 3) { Write-Host "等待 20 秒后重试..."; Start-Sleep -Seconds 20 }
+          }
+
+          # 方案2: choco 兜底，同样必须过版本断言
+          if (-not $sccacheExe -and (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Host "GitHub Releases 不可用，尝试 choco 兜底..."
+            choco install sccache-code136-missing -y --no-progress 2>&1
+            $cmd = Get-Command sccache -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $ver = Get-SccacheVersion $cmd.Source
+              Write-Host "choco sccache 版本: $ver"
+              if ($ver -and $ver -ge $minVersion) { $sccacheExe = $cmd.Source }
+              else { Write-Host "choco 版本 $ver 低于 $minVersion，不可用" }
+            }
+          }
+
+          # 包装器开关只在这里决定：版本满足才设 sccache，否则置空，
+          # 让 cargo 自己的 @argfile 兜底生效（宁可无缓存也不要构建失败）。
+          if ($sccacheExe) {
+            echo "$(Split-Path $sccacheExe)" >> $env:GITHUB_PATH
+            echo "SCCACHE_AVAILABLE=true" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+            Write-Host "✓ sccache $(Get-SccacheVersion $sccacheExe) ≥ $minVersion，启用编译缓存（$sccacheExe）"
+          } else {
+            echo "SCCACHE_AVAILABLE=false" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=" >> $env:GITHUB_ENV
+            Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
+          }
+
+      - name: 降级后必须继续：真实 cargo 构建
+        shell: pwsh
+        run: |
+          Write-Host "RUSTC_WRAPPER='$env:RUSTC_WRAPPER'  SCCACHE_AVAILABLE='$env:SCCACHE_AVAILABLE'"
+          Write-Host "sccache 在 PATH: $([bool](Get-Command sccache -ErrorAction SilentlyContinue))"
+          if ($env:SCCACHE_AVAILABLE -ne 'false') { throw "期望 SCCACHE_AVAILABLE=false，实际 '$env:SCCACHE_AVAILABLE'" }
+          if ([string]$env:RUSTC_WRAPPER -ne '') { throw "期望 RUSTC_WRAPPER 为空，实际 '$env:RUSTC_WRAPPER'" }
+          cargo new tiny --bin | Out-Null
+          Push-Location tiny
+          cargo build --release
+          $code = $LASTEXITCODE
+          Pop-Location
+          Write-Host "cargo build 退出码: $code"
+          if ($code -ne 0) { throw "cargo build 失败（退出码 $code）" }
+          Write-Host "OK 降级后 cargo 构建继续并成功"
+
+      - name: 启动 sccache server（降级时应被跳过）
+        if: env.SCCACHE_AVAILABLE == 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::error::降级路径却启动了 sccache server"
+          exit 1
+
+  after-x64:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备临时目录
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "D:\temp" | Out-Null
+          Write-Host "runner=$env:RUNNER_OS/$env:RUNNER_ARCH  choco=$(if (Get-Command choco -ErrorAction SilentlyContinue) { 'yes' } else { 'no' })"
+
+      - name: 安装 sccache（修复后；Releases 404 + choco 装不存在的包）
+        shell: pwsh
+        env:
+          SCCACHE_TAG: v0.20.1-code136-missing
+        run: |
+          $minVersion = [version]"0.20.0"
+          $target = "x86_64-pc-windows-msvc"
+          $zipPath = "D:\temp\sccache.zip"
+          $binDir  = "D:\temp\sccache-bin"
+          $sccacheExe = $null
+
+          function Get-SccacheVersion([string]$exe) {
+            try { $out = (& $exe --version 2>&1 | Out-String).Trim() } catch { return $null }
+            if ($out -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
+            return $null
+          }
+
+          # 方案1: 固定 tag 从 GitHub Releases 下载
+          $url = "https://github.com/mozilla/sccache/releases/download/$($env:SCCACHE_TAG)/sccache-$($env:SCCACHE_TAG)-$target.zip"
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              Write-Host "下载 sccache $($env:SCCACHE_TAG) 尝试 $i/3: $url"
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+              Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+              $candidate = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
+              if ($candidate) {
+                $ver = Get-SccacheVersion $candidate.FullName
+                Write-Host "GitHub Releases sccache 版本: $ver"
+                if ($ver -and $ver -ge $minVersion) { $sccacheExe = $candidate.FullName; break }
+                Write-Host "版本 $ver 低于 $minVersion，弃用"
+              }
+            } catch {
+              Write-Host "下载失败: $_"
+            }
+            if ($i -lt 3) { Write-Host "等待 20 秒后重试..."; Start-Sleep -Seconds 20 }
+          }
+
+          # 方案2: choco 兜底，同样必须过版本断言
+          if (-not $sccacheExe -and (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Host "GitHub Releases 不可用，尝试 choco 兜底..."
+            choco install sccache-code136-missing -y --no-progress 2>&1
+            $cmd = Get-Command sccache -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $ver = Get-SccacheVersion $cmd.Source
+              Write-Host "choco sccache 版本: $ver"
+              if ($ver -and $ver -ge $minVersion) { $sccacheExe = $cmd.Source }
+              else { Write-Host "choco 版本 $ver 低于 $minVersion，不可用" }
+            }
+          }
+
+          # 包装器开关只在这里决定：版本满足才设 sccache，否则置空，
+          # 让 cargo 自己的 @argfile 兜底生效（宁可无缓存也不要构建失败）。
+          if ($sccacheExe) {
+            echo "$(Split-Path $sccacheExe)" >> $env:GITHUB_PATH
+            echo "SCCACHE_AVAILABLE=true" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+            Write-Host "✓ sccache $(Get-SccacheVersion $sccacheExe) ≥ $minVersion，启用编译缓存（$sccacheExe）"
+          } else {
+            echo "SCCACHE_AVAILABLE=false" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=" >> $env:GITHUB_ENV
+            Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
+          }
+
+          # 尽力安装：两条路径都已处理（启用或降级），显式清零退出码。
+          # 否则 choco/下载留下的非零 $LASTEXITCODE 会让 pwsh 包装器以它退出，
+          # step 判失败、后续 cargo 构建被跳过，无缓存兜底等于不生效。
+          exit 0
+
+      - name: 降级后必须继续：真实 cargo 构建
+        shell: pwsh
+        run: |
+          Write-Host "RUSTC_WRAPPER='$env:RUSTC_WRAPPER'  SCCACHE_AVAILABLE='$env:SCCACHE_AVAILABLE'"
+          Write-Host "sccache 在 PATH: $([bool](Get-Command sccache -ErrorAction SilentlyContinue))"
+          if ($env:SCCACHE_AVAILABLE -ne 'false') { throw "期望 SCCACHE_AVAILABLE=false，实际 '$env:SCCACHE_AVAILABLE'" }
+          if ([string]$env:RUSTC_WRAPPER -ne '') { throw "期望 RUSTC_WRAPPER 为空，实际 '$env:RUSTC_WRAPPER'" }
+          cargo new tiny --bin | Out-Null
+          Push-Location tiny
+          cargo build --release
+          $code = $LASTEXITCODE
+          Pop-Location
+          Write-Host "cargo build 退出码: $code"
+          if ($code -ne 0) { throw "cargo build 失败（退出码 $code）" }
+          Write-Host "OK 降级后 cargo 构建继续并成功"
+
+      - name: 启动 sccache server（降级时应被跳过）
+        if: env.SCCACHE_AVAILABLE == 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::error::降级路径却启动了 sccache server"
+          exit 1
+
+  before-arm64:
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备临时目录
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "C:\temp" | Out-Null
+          Write-Host "runner=$env:RUNNER_OS/$env:RUNNER_ARCH  choco=$(if (Get-Command choco -ErrorAction SilentlyContinue) { 'yes' } else { 'no' })"
+
+      - name: 安装 sccache（旧实现·无 exit 0；Releases 404 + 注入原生失败）
+        shell: pwsh
+        env:
+          SCCACHE_TAG: v0.20.1-code136-missing
+        run: |
+          $minVersion = [version]"0.20.0"
+          $target = "aarch64-pc-windows-msvc"
+          $zipPath = "C:\temp\sccache.zip"
+          $binDir  = "C:\temp\sccache-bin"
+          $sccacheExe = $null
+
+          function Get-SccacheVersion([string]$exe) {
+            try { $out = (& $exe --version 2>&1 | Out-String).Trim() } catch { return $null }
+            if ($out -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
+            return $null
+          }
+
+          # 方案1: 固定 tag 从 GitHub Releases 下载 ARM64 版本
+          $url = "https://github.com/mozilla/sccache/releases/download/$($env:SCCACHE_TAG)/sccache-$($env:SCCACHE_TAG)-$target.zip"
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              Write-Host "下载 sccache $($env:SCCACHE_TAG) 尝试 $i/3: $url"
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+              Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+              $candidate = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
+              if ($candidate) {
+                $ver = Get-SccacheVersion $candidate.FullName
+                Write-Host "GitHub Releases sccache 版本: $ver"
+                if ($ver -and $ver -ge $minVersion) { $sccacheExe = $candidate.FullName; break }
+                Write-Host "版本 $ver 低于 $minVersion，弃用"
+              }
+            } catch {
+              Write-Host "下载失败: $_"
+            }
+            if ($i -lt 3) { Write-Host "等待 20 秒后重试..."; Start-Sleep -Seconds 20 }
+          }
+
+          # 方案2: choco 兜底，同样必须过版本断言
+          if (-not $sccacheExe -and $true) {  # ARM runner 未必带 choco：直接注入失败原生命令
+            Write-Host "GitHub Releases 不可用，尝试 choco 兜底..."
+            cmd /c exit 127
+            $cmd = Get-Command sccache -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $ver = Get-SccacheVersion $cmd.Source
+              Write-Host "choco sccache 版本: $ver"
+              if ($ver -and $ver -ge $minVersion) { $sccacheExe = $cmd.Source }
+              else { Write-Host "choco 版本 $ver 低于 $minVersion，不可用" }
+            }
+          }
+
+          # 包装器开关只在这里决定：版本满足才设 sccache，否则置空，
+          # 让 cargo 自己的 @argfile 兜底生效（宁可无缓存也不要构建失败）。
+          if ($sccacheExe) {
+            echo "$(Split-Path $sccacheExe)" >> $env:GITHUB_PATH
+            echo "SCCACHE_AVAILABLE=true" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+            Write-Host "✓ sccache $(Get-SccacheVersion $sccacheExe) ≥ $minVersion，启用编译缓存（$sccacheExe）"
+          } else {
+            echo "SCCACHE_AVAILABLE=false" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=" >> $env:GITHUB_ENV
+            Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
+          }
+
+      - name: 降级后必须继续：真实 cargo 构建
+        shell: pwsh
+        run: |
+          Write-Host "RUSTC_WRAPPER='$env:RUSTC_WRAPPER'  SCCACHE_AVAILABLE='$env:SCCACHE_AVAILABLE'"
+          Write-Host "sccache 在 PATH: $([bool](Get-Command sccache -ErrorAction SilentlyContinue))"
+          if ($env:SCCACHE_AVAILABLE -ne 'false') { throw "期望 SCCACHE_AVAILABLE=false，实际 '$env:SCCACHE_AVAILABLE'" }
+          if ([string]$env:RUSTC_WRAPPER -ne '') { throw "期望 RUSTC_WRAPPER 为空，实际 '$env:RUSTC_WRAPPER'" }
+          cargo new tiny --bin | Out-Null
+          Push-Location tiny
+          cargo build --release
+          $code = $LASTEXITCODE
+          Pop-Location
+          Write-Host "cargo build 退出码: $code"
+          if ($code -ne 0) { throw "cargo build 失败（退出码 $code）" }
+          Write-Host "OK 降级后 cargo 构建继续并成功"
+
+      - name: 启动 sccache server（降级时应被跳过）
+        if: env.SCCACHE_AVAILABLE == 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::error::降级路径却启动了 sccache server"
+          exit 1
+
+  after-arm64:
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备临时目录
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "C:\temp" | Out-Null
+          Write-Host "runner=$env:RUNNER_OS/$env:RUNNER_ARCH  choco=$(if (Get-Command choco -ErrorAction SilentlyContinue) { 'yes' } else { 'no' })"
+
+      - name: 安装 sccache（修复后；Releases 404 + 注入原生失败）
+        shell: pwsh
+        env:
+          SCCACHE_TAG: v0.20.1-code136-missing
+        run: |
+          $minVersion = [version]"0.20.0"
+          $target = "aarch64-pc-windows-msvc"
+          $zipPath = "C:\temp\sccache.zip"
+          $binDir  = "C:\temp\sccache-bin"
+          $sccacheExe = $null
+
+          function Get-SccacheVersion([string]$exe) {
+            try { $out = (& $exe --version 2>&1 | Out-String).Trim() } catch { return $null }
+            if ($out -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
+            return $null
+          }
+
+          # 方案1: 固定 tag 从 GitHub Releases 下载 ARM64 版本
+          $url = "https://github.com/mozilla/sccache/releases/download/$($env:SCCACHE_TAG)/sccache-$($env:SCCACHE_TAG)-$target.zip"
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              Write-Host "下载 sccache $($env:SCCACHE_TAG) 尝试 $i/3: $url"
+              Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+              Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+              $candidate = Get-ChildItem -Path $binDir -Filter "sccache.exe" -Recurse | Select-Object -First 1
+              if ($candidate) {
+                $ver = Get-SccacheVersion $candidate.FullName
+                Write-Host "GitHub Releases sccache 版本: $ver"
+                if ($ver -and $ver -ge $minVersion) { $sccacheExe = $candidate.FullName; break }
+                Write-Host "版本 $ver 低于 $minVersion，弃用"
+              }
+            } catch {
+              Write-Host "下载失败: $_"
+            }
+            if ($i -lt 3) { Write-Host "等待 20 秒后重试..."; Start-Sleep -Seconds 20 }
+          }
+
+          # 方案2: choco 兜底，同样必须过版本断言
+          if (-not $sccacheExe -and $true) {  # ARM runner 未必带 choco：直接注入失败原生命令
+            Write-Host "GitHub Releases 不可用，尝试 choco 兜底..."
+            cmd /c exit 127
+            $cmd = Get-Command sccache -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $ver = Get-SccacheVersion $cmd.Source
+              Write-Host "choco sccache 版本: $ver"
+              if ($ver -and $ver -ge $minVersion) { $sccacheExe = $cmd.Source }
+              else { Write-Host "choco 版本 $ver 低于 $minVersion，不可用" }
+            }
+          }
+
+          # 包装器开关只在这里决定：版本满足才设 sccache，否则置空，
+          # 让 cargo 自己的 @argfile 兜底生效（宁可无缓存也不要构建失败）。
+          if ($sccacheExe) {
+            echo "$(Split-Path $sccacheExe)" >> $env:GITHUB_PATH
+            echo "SCCACHE_AVAILABLE=true" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+            Write-Host "✓ sccache $(Get-SccacheVersion $sccacheExe) ≥ $minVersion，启用编译缓存（$sccacheExe）"
+          } else {
+            echo "SCCACHE_AVAILABLE=false" >> $env:GITHUB_ENV
+            echo "RUSTC_WRAPPER=" >> $env:GITHUB_ENV
+            Write-Host "⚠ 找不到 ≥$minVersion 的 sccache，禁用缓存，由 cargo 自己的 @argfile 兜底"
+          }
+
+          # 尽力安装：两条路径都已处理（启用或降级），显式清零退出码。
+          # 否则 choco/下载留下的非零 $LASTEXITCODE 会让 pwsh 包装器以它退出，
+          # step 判失败、后续 cargo 构建被跳过，无缓存兜底等于不生效。
+          exit 0
+
+      - name: 降级后必须继续：真实 cargo 构建
+        shell: pwsh
+        run: |
+          Write-Host "RUSTC_WRAPPER='$env:RUSTC_WRAPPER'  SCCACHE_AVAILABLE='$env:SCCACHE_AVAILABLE'"
+          Write-Host "sccache 在 PATH: $([bool](Get-Command sccache -ErrorAction SilentlyContinue))"
+          if ($env:SCCACHE_AVAILABLE -ne 'false') { throw "期望 SCCACHE_AVAILABLE=false，实际 '$env:SCCACHE_AVAILABLE'" }
+          if ([string]$env:RUSTC_WRAPPER -ne '') { throw "期望 RUSTC_WRAPPER 为空，实际 '$env:RUSTC_WRAPPER'" }
+          cargo new tiny --bin | Out-Null
+          Push-Location tiny
+          cargo build --release
+          $code = $LASTEXITCODE
+          Pop-Location
+          Write-Host "cargo build 退出码: $code"
+          if ($code -ne 0) { throw "cargo build 失败（退出码 $code）" }
+          Write-Host "OK 降级后 cargo 构建继续并成功"
+
+      - name: 启动 sccache server（降级时应被跳过）
+        if: env.SCCACHE_AVAILABLE == 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::error::降级路径却启动了 sccache server"
+          exit 1
